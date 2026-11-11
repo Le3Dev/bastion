@@ -1,0 +1,36 @@
+.cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--esp-4);
+  flex-wrap: wrap;
+}
+
+.contadores {
+  display: flex;
+  gap: var(--esp-4);
+  margin-bottom: var(--esp-3);
+}
+
+.linhaBloqueada {
+  border-left: 4px solid var(--danger);
+  background: var(--surface-2);
+}
+
+.linhaBloqueada td:first-child {
+  padding-left: var(--esp-2);
+}
+
+.etapa {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto 2fr;
+  gap: var(--esp-3);
+  align-items: center;
+}
+
+.notaFinal {
+  display: flex;
+  align-items: center;
+  gap: var(--esp-5);
+  flex-wrap: wrap;
+}
