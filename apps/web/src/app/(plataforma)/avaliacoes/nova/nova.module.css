@@ -1,0 +1,26 @@
+.cartaoDePerfil {
+  display: flex;
+  gap: var(--esp-3);
+  align-items: flex-start;
+  padding: var(--esp-3) var(--esp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.cartaoDePerfil:hover {
+  border-color: var(--muted);
+}
+
+.selecionado {
+  border-color: var(--accent);
+}
+
+.desabilitado {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.desabilitado:hover {
+  border-color: var(--border);
+}
