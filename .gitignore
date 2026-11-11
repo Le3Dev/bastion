@@ -7,3 +7,6 @@ coverage
 .env*
 !.env.example
 *.tsbuildinfo
+
+# Gerado e recriado automaticamente pelo `next dev` (instruções para agentes de IA); a documentação do projeto fica só no README.md
+apps/web/AGENTS.md
