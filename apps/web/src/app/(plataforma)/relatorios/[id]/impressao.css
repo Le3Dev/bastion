@@ -1,0 +1,64 @@
+/* Estilos de impressão do relatório (Baixar PDF usa window.print). Só @media print, sem cores fixas. */
+@media print {
+  .menu-lateral,
+  .sem-impressao,
+  .btn {
+    display: none !important;
+  }
+
+  .app {
+    display: block;
+  }
+
+  body,
+  .conteudo,
+  .card,
+  .alert,
+  .bloco-codigo {
+    background: var(--accent-2);
+    color: var(--on-accent);
+  }
+
+  .conteudo {
+    padding: 0;
+  }
+
+  .card,
+  .table th,
+  .table td,
+  .bloco-codigo,
+  .cabecalho-pagina,
+  .alert {
+    border-color: var(--border);
+  }
+
+  .card {
+    break-inside: avoid;
+  }
+
+  .tag,
+  .label,
+  .kpi-rotulo,
+  .texto-2,
+  .texto-muted,
+  .card-titulo,
+  .table th,
+  .lista-definicao dt,
+  .nota,
+  .nota-escala,
+  .nota-boa,
+  .nota-atencao,
+  .nota-critica,
+  .nota-sem {
+    color: var(--on-accent);
+  }
+
+  a {
+    color: var(--on-accent);
+    text-decoration: none;
+  }
+
+  .table tbody tr:hover {
+    background: transparent;
+  }
+}
