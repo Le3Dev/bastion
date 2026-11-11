@@ -15,13 +15,23 @@ Regras inegociáveis do produto:
 
 Pré-requisitos: **Node ≥ 24** (há um `.nvmrc`) e pnpm via corepack (a versão fica fixada em `packageManager`).
 
+Na primeira vez, em cada máquina, habilite o corepack. No Windows, isso pode exigir um terminal aberto como administrador:
+
 ```bash
-corepack pnpm install     # instala as dependências do monorepo
-corepack pnpm dev         # protótipo em modo desenvolvimento, na porta 3000
-corepack pnpm build       # build de produção
-corepack pnpm typecheck   # verificação de tipos (TypeScript estrito)
-corepack pnpm lint        # ESLint
+corepack enable           # deixa o comando pnpm disponível no PATH, na versão fixada
 ```
+
+```bash
+pnpm install              # instala as dependências do monorepo
+pnpm dev                  # protótipo em modo desenvolvimento, na porta 3000
+pnpm build                # build de produção
+pnpm typecheck            # verificação de tipos (TypeScript estrito)
+pnpm lint                 # ESLint
+```
+
+> Sem `corepack enable`, `corepack pnpm dev` na raiz falha com "pnpm não é reconhecido", porque o script interno chama `pnpm`. Nesse caso, rode direto: `corepack pnpm --filter @bastion/web dev`.
+
+Para continuar o desenvolvimento em outra máquina, veja a seção 9.2.
 
 A **Fase 1 (protótipo navegável) não precisa de banco de dados nem de variáveis de ambiente**: os dados são fictícios e ficam em memória no navegador.
 
@@ -154,6 +164,8 @@ Login · Painel · Sistemas · Cadastro de sistema (com passo de verificação) 
 - Relatório HTML e PDF; auditoria; API pública `/v1` (seção 6).
 - Testes unitários do domínio (máquinas de estado, objetos de valor, regras de escopo).
 
+Plano de execução detalhado na seção 9.
+
 ### Fora do MVP
 Módulos de IA (chatbots e agentes), ambientes isolados criados pela plataforma, integrações Jira, Teams e Slack, cobrança real e SSO SAML.
 
@@ -200,7 +212,7 @@ Componentes básicos: `.btn` (`btn-cta`, `btn-outline`, `btn-danger`, `btn-sm`),
 
 ### Roteiro do protótipo (Fase 1)
 
-Rode `corepack pnpm dev` e abra a porta 3000. Os dados são fictícios, ficam só na memória do navegador e voltam ao início ao recarregar a página.
+Rode `pnpm dev` (veja a seção 2) e abra a porta 3000. Os dados são fictícios, ficam só na memória do navegador e voltam ao início ao recarregar a página.
 
 | Tela | Rota | O que fazer |
 |---|---|---|
@@ -216,3 +228,189 @@ Rode `corepack pnpm dev` e abra a porta 3000. Os dados são fictícios, ficam s�
 | Integrações | `/integracoes` | Chaves de API (segredo mostrado uma só vez) e webhooks de saída. |
 | Equipe e auditoria | `/equipe` | Convide membros, altere papéis e consulte o log de auditoria. |
 | Plano e cobrança | `/plano` | Limites, uso e faturas do plano fictício. |
+
+## 9. Plano da Fase 2 (plataforma real)
+
+> **Status: aguardando aprovação.** Este plano foi escrito em 2026-11-11, ao fim da Fase 1, para ser retomado em qualquer máquina. Antes de executar, confirme as perguntas em aberto (9.10). Quando a Fase 2 terminar, esta seção vira histórico e o conteúdo definitivo migra para as seções 2 a 8.
+
+### 9.1 Objetivo
+
+Trocar o protótipo em memória pela plataforma real:
+- API Fastify (plano de controle) e worker (plano de execução), com Postgres, Redis e MinIO via Docker Compose;
+- contextos DDD da seção 4.2, organizados por pasta de negócio;
+- máquinas de estado da avaliação e do achado testadas com Vitest;
+- verificação de propriedade e Guardião de Escopo bloqueando domínios de produção;
+- primeiro módulo de avaliação, só passivo;
+- achados com deduplicação, relatório HTML/PDF, auditoria e API `/v1`.
+
+### 9.2 Retomar em outra máquina
+
+```bash
+git clone https://github.com/Le3Dev/bastion.git
+cd bastion
+git checkout feature/prototipo-navegavel   # ou main, depois do merge do PR da Fase 1
+corepack enable                            # uma vez por máquina (veja a seção 2)
+pnpm install
+pnpm dev                                   # protótipo na porta 3000
+```
+
+- **Pré-requisitos extras da Fase 2:** Docker Desktop (Compose v2) e o Chromium do Playwright (`pnpm exec playwright install chromium`).
+- **Branches:** uma branch e um PR por leva (ex.: `feature/fase2-dominio`, `feature/fase2-api-nucleo`), sempre criadas a partir da `main` atualizada.
+- **Commits:** Conventional Commits em português, um por feature. Nunca commit direto na `main`.
+
+### 9.3 Estrutura alvo
+
+```
+apps/
+  web/                         Next.js (as telas passam a consumir a API)
+  api/
+    migracoes/                 SQL versionado
+    src/
+      contas/ sistemas/ avaliacoes/ achados/ relatorios/ auditoria/
+        dominio/               agregados, objetos de valor, eventos e regras (sem framework)
+        aplicacao/             casos de uso
+        infraestrutura/        repositórios (Kysely) e rotas (Fastify)
+      integracoes/             camada anticorrupção: filas do worker, armazenamento de evidências
+      compartilhado/           config, erros HTTP, contexto da organização (RLS), outbox
+      servidor.ts
+  worker/src/
+    guardiao-de-escopo/        regras de escopo + cliente HTTP protegido
+    modulos/passivo/           cabeçalhos, TLS, cookies, exposição de versão
+    tarefas/                   consumidores das filas
+packages/
+  dominio-compartilhado/       ErroDeDominio, Email, Severidade, ImpressaoDigital, Papel
+  contratos/                   esquemas Zod e tipos da API /v1 e das mensagens das filas
+infra/
+  alvo-de-teste/               nginx propositalmente mal configurado, único alvo dos testes ponta a ponta
+docker-compose.yml             postgres, redis, minio, alvo-de-teste
+```
+
+### 9.4 Decisões propostas (viram ADRs 9 em diante ao executar)
+
+| Tema | Proposta | Motivo |
+|---|---|---|
+| Acesso a dados | Kysely + `pg`, migrações em SQL versionado | SQL explícito e tipado; `SET LOCAL app.organizacao_id` por transação alimenta o RLS |
+| Contratos | Zod 4 em `packages/contratos` + `fastify-type-provider-zod` | O mesmo esquema valida a API e tipa o web e o worker |
+| Sessão web | Cookie de sessão opaco (`HttpOnly`, `Secure`, `SameSite=Lax`), guardado como hash no banco; senha com Argon2id | Revogável, sem token no JavaScript do navegador |
+| API pública e CI | Chave `bst_...` em `Authorization: Bearer`, guardada só como hash SHA-256, ligada à organização e a um papel | O segredo aparece uma única vez, como no protótipo |
+| Progresso ao vivo | SSE em `GET /v1/avaliacoes/{id}/eventos` | Fluxo unidirecional, simples e sem biblioteca extra |
+| Fila | BullMQ: `avaliacoes`, `verificacoes` e `webhooks` (API → worker); `resultados` (worker → API) | Reentrega, novas tentativas e consumo idempotente |
+| Worker sem dados (ADR 2) | O worker não recebe credenciais de Postgres nem de MinIO. A tarefa traz alvo, escopo e limites, e URLs pré-assinadas para enviar evidências | Um worker comprometido não lê dados de clientes |
+| Saída só pelo Guardião | A verificação de propriedade e a entrega de webhooks também rodam no worker. A API só assina o corpo do webhook (HMAC-SHA256) | Cumpre a regra "todo tráfego de saída passa pelo Guardião" |
+| PDF | Playwright/Chromium na API, renderizando o HTML do relatório sem acesso à rede; o PDF fica no MinIO | Menos peças no MVP |
+| Testes | Vitest (domínio, Guardião, módulo passivo, integração com o Postgres do Compose) + Playwright (fluxo principal no web) | Segue a seção 3 |
+
+Versões conferidas em 2026-11-11 (confirmar com `npm view` antes de instalar): Fastify 5.12, BullMQ 6.7, ioredis 6.0, Kysely 0.29, pg 8.23, Zod 4.6, fastify-type-provider-zod 7.0, Vitest 5.1, Playwright 1.65, undici 8.12, @aws-sdk/client-s3 3.x, @node-rs/argon2 2.2, tsx 4.23.
+
+### 9.5 Contrato entre API e worker
+
+| Fila | Sentido | Tarefa ou evento | Conteúdo principal |
+|---|---|---|---|
+| `avaliacoes` | API → worker | `executar-avaliacao` | `avaliacaoId`, `organizacaoId`, `perfil`, `urlDeHomologacao`, `escopo { hostsPermitidos, dominiosBloqueados, requisicoesPorSegundo, tempoMaximoMs }`, URLs pré-assinadas de evidência |
+| `verificacoes` | API → worker | `verificar-propriedade` | `sistemaId`, `metodo`, `token`, `urlDeHomologacao` |
+| `webhooks` | API → worker | `entregar-webhook` | `entregaId`, `url`, `corpo`, `assinatura`, `eventoId` |
+| `resultados` | worker → API | `etapa-atualizada`, `requisicao-do-guardiao`, `constatacao`, `avaliacao-finalizada`, `avaliacao-falhou`, `verificacao-concluida`, `entrega-concluida` | Todos com `idDoEvento`, para a API consumir de forma idempotente |
+
+**Parar avaliação:** a API muda o estado para `CANCELADA` e publica um sinal de cancelamento no Redis. O worker confere o sinal entre requisições e encerra.
+
+### 9.6 Guardião de Escopo: requisitos
+
+- **Escopo:** libera só os hosts verificados da organização que vieram no escopo da tarefa. Bloqueia o domínio de produção declarado e todos os seus subdomínios.
+- **DNS e IPs:** resolve o DNS e rejeita IPs privados, de loopback, link-local, de metadados de nuvem (`169.254.169.254`) e IPv6 locais. Conecta no IP já validado, o que impede DNS rebinding.
+- **Redirecionamentos:** segue redirecionamentos manualmente, revalidando cada salto, com limite de saltos.
+- **Perfil passivo:** só `GET` e `HEAD`, limite de taxa por host (padrão: 5 req/s), tempo limite por requisição e tamanho máximo de resposta.
+- **Registro:** toda decisão (permitida ou bloqueada, com motivo) vira o evento `requisicao-do-guardiao`, gravado na avaliação e na auditoria.
+- **Desenvolvimento:** `GUARDIAO_PERMITIR_REDES_PRIVADAS=true` libera a rede local só para o alvo de teste do Compose. Em produção essa variável é proibida.
+
+### 9.7 Subtarefas por leva
+
+No máximo 3 executores por leva, nunca dois no mesmo arquivo. Cada leva termina com typecheck, lint, testes e build verdes, commits por feature e push.
+
+**Leva 1: domínio puro, contratos e infraestrutura (em paralelo)**
+
+| Executor | Escopo | Arquivos |
+|---|---|---|
+| D | `packages/dominio-compartilhado` e `packages/contratos` (Zod da API `/v1` e das mensagens das filas). Domínio de Avaliações (máquina de estados com limite de 20 min em `PREPARANDO` e tempo máximo por perfil), Achados (máquina de estados, risco aceito com vencimento, deduplicação por `ImpressaoDigital`) e Relatórios (`NotaDeSeguranca`, `MapeamentoDeConformidade`), com testes. Configuração de `apps/api` | `packages/**`, `apps/api/src/{avaliacoes,achados,relatorios}/dominio/**`, `apps/api/{package.json,tsconfig.json,vitest.config.ts}` |
+| E | Domínio de Contas (`Organizacao`, `Membro`, `Papel`, `ChaveDeApi`, `WebhookDeSaida`), Sistemas (`Sistema`, `VerificacaoDePropriedade`, `Escopo` com domínio de produção obrigatório) e Auditoria (`RegistroDeAuditoria`, só inclusão), com testes. No worker: regras puras do Guardião e analisadores do módulo passivo (respostas e handshakes entram, constatações saem), testados com fixtures. Configuração de `apps/worker` | `apps/api/src/{contas,sistemas,auditoria}/dominio/**`, `apps/worker/**` |
+| F | `docker-compose.yml` (Postgres, Redis, MinIO, alvo de teste), `.env.example` e `infra/alvo-de-teste/**`. Migrações SQL: todas as tabelas com `organizacao_id` e RLS; papéis `bastion_migrador` (dono) e `bastion_app` (sem BYPASSRLS); auditoria protegida contra UPDATE e DELETE; tabela de outbox. README seção 2 (como rodar com o Compose e as variáveis de ambiente) | `docker-compose.yml`, `.env.example`, `infra/**`, `apps/api/migracoes/**`, `README.md` |
+
+D e E trabalham em paralelo. Por isso, a API de `packages/dominio-compartilhado` fica combinada antes:
+- `ErroDeDominio(mensagem, codigo)`;
+- `Email.criar(valor)` com `.valor`;
+- `Severidade`, `Papel` e `ImpressaoDigital.de(sistemaId, tipo, local)`.
+
+**Leva 2: aplicação e integrações**
+
+| Executor | Escopo | Arquivos |
+|---|---|---|
+| G | API núcleo: bootstrap Fastify, com tratamento de erros e mensagens claras, rate limit e CORS para o web. Também: Kysely + contexto da organização por transação (RLS), executor de migrações, autenticação (sessão e chave de API); aplicação, repositórios e rotas de Contas, Sistemas (`POST /v1/sistemas` e `/verificacao`) e Auditoria; chaves de API e webhooks; outbox e publicador, produtor das filas e consumidor de `verificacao-concluida`. Testes de integração no Postgres do Compose | `apps/api/src/{compartilhado,contas,sistemas,auditoria}/{aplicacao,infraestrutura}/**`, `apps/api/src/integracoes/**`, `apps/api/src/servidor.ts`, `apps/api/package.json` |
+| H | Worker: consumidores BullMQ (`executar-avaliacao`, `verificar-propriedade`, `entregar-webhook`) e cliente HTTP do Guardião (undici com DNS fixado). Também: execução do módulo passivo com os analisadores da leva 1, sinal de cancelamento, envio de evidências por URL pré-assinada e eventos na fila `resultados`. Testes contra o alvo de teste | `apps/worker/**` |
+| I | Web, parte 1: cliente da API tipado por `packages/contratos`, sessão (entrar, sair, guarda das rotas autenticadas). Telas Login, Painel, Sistemas, Cadastro de sistema, Equipe e auditoria e Integrações passam a consumir a API | `apps/web/src/api/**`, essas rotas, `apps/web/package.json` |
+
+**Leva 3: avaliações, achados e relatórios de ponta a ponta**
+
+| Executor | Escopo | Arquivos |
+|---|---|---|
+| J | API: Avaliações (`POST /v1/avaliacoes`, `GET /{id}`, `/parar`, SSE `/eventos`, vigilância dos tempos máximos); Achados (lista paginada com filtro por severidade, `PATCH`, `/revalidar`, vencimento do risco aceito); consumidor da fila `resultados` (persistência idempotente, deduplicação, nota); Relatórios (JSON, HTML e PDF); eventos `avaliacao.*` e `achado.*` no outbox para os webhooks. README seção 6 com todos os endpoints | `apps/api/src/{avaliacoes,achados,relatorios}/{aplicacao,infraestrutura}/**`, registro das rotas em `servidor.ts`, `README.md` |
+| K | Web, parte 2: Nova avaliação, Avaliação ao vivo (SSE), Lista e Detalhe de achados, Relatório (PDF real) e Plano. Também: remoção do armazém fictício (`src/prototipo`), testes Playwright do fluxo principal (entrar → cadastrar o alvo de teste → verificar → avaliar → tratar achado → baixar relatório) e README seção 8 (guia do usuário completo) | demais rotas de `apps/web`, `apps/web/src/prototipo/**`, `apps/web/e2e/**` |
+
+**Leva 4: verificação integrada.** `docker compose up -d`, migrações, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` e o fluxo ponta a ponta contra o alvo de teste. Por fim, correções pontuais e o PR de cada leva.
+
+### 9.8 Testes unitários previstos (Vitest)
+
+- **Avaliação:**
+  - transições válidas e inválidas;
+  - cancelamento a partir de qualquer estado não final;
+  - `PREPARANDO` acima de 20 min vira `FALHOU`;
+  - tempo máximo por perfil;
+  - eventos emitidos.
+- **Achado:**
+  - transições;
+  - `RISCO_ACEITO` exige justificativa, responsável e data futura;
+  - no vencimento, volta para `CONFIRMADO`;
+  - `CORRIGIDO` vira `REABERTO` quando o achado reaparece.
+- **Deduplicação:** a mesma impressão digital agrupa e soma ocorrências; sistema, tipo ou local diferentes não agrupam.
+- **Nota de segurança:** pesos por severidade, limites 0 e 100, achados corrigidos e com risco aceito fora da conta.
+- **Sistema:**
+  - domínio de produção obrigatório;
+  - homologação igual ao domínio de produção, ou subdomínio dele, é rejeitada;
+  - a verificação expira.
+- **Guardião:**
+  - host não verificado é bloqueado;
+  - o domínio de produção e seus subdomínios são bloqueados;
+  - IP privado, loopback, link-local e metadados são bloqueados;
+  - DNS que resolve para IP privado é bloqueado;
+  - redirecionamento para fora do escopo é bloqueado;
+  - limite de taxa;
+  - métodos fora de `GET`/`HEAD` são recusados no perfil passivo.
+- **Módulo passivo:**
+  - fixtures de cabeçalhos geram as constatações esperadas;
+  - parsing de `Set-Cookie`;
+  - detecção de versão em `Server`, `X-Powered-By` e afins;
+  - TLS 1.0/1.1 aceito e certificado perto de vencer.
+- **Webhooks:** a assinatura HMAC é determinística e a verificação usa `timingSafeEqual`.
+- **Auditoria:** o repositório não expõe alteração nem remoção, e o banco recusa UPDATE e DELETE.
+
+### 9.9 Riscos
+
+- **RLS:** só isola de fato se a aplicação usar `bastion_app` (sem BYPASSRLS, não dono das tabelas). O login precisa achar o usuário antes de existir o contexto da organização: tabela `usuarios` global sem RLS, ou função `SECURITY DEFINER`.
+- **SSRF e DNS rebinding:** valem para o Guardião e para a entrega de webhooks, inclusive nos redirecionamentos.
+- **Playwright:** o Chromium pesa (~150 MB) e precisa de `playwright install` em cada máquina e na imagem da API.
+- **Versões novas:** confirmar BullMQ 6 × ioredis 6, Vitest 5 e TypeScript 6 antes de fixar.
+- **Só alvos autorizados:** os testes ponta a ponta usam apenas o alvo de teste local; nunca sites de terceiros.
+- **PRs grandes:** um PR por leva, e avisar um revisor antes dos maiores (política de PR).
+- **Windows:** requer Docker Desktop com WSL2, e as portas 3000 (web), 3333 (API), 5432, 6379, 9000/9001 (MinIO) e 8443 (alvo de teste) livres.
+
+### 9.10 Perguntas em aberto (confirmar ao aprovar)
+
+1. Acesso a dados: Kysely (recomendado), Drizzle ou Prisma?
+2. Sessão web: cookie opaco (recomendado) ou JWT?
+3. Depois da integração: remover o armazém fictício (recomendado) ou manter um "modo demonstração" por variável de ambiente?
+4. PDF: na própria API (recomendado no MVP) ou num serviço separado?
+5. Agendamento recorrente: entra na Fase 2 ou fica para depois (só disparo manual e pelo CI)?
+
+### 9.11 Pendências herdadas da Fase 1
+
+- `pnpm dev` na raiz depende de `corepack enable` (seção 2).
+- `apps/web/AGENTS.md` é gerado pelo `next dev` e está no `.gitignore`.
+- Ainda não há testes automatizados das telas; o Playwright entra na leva 3.
