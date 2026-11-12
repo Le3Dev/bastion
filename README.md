@@ -114,7 +114,7 @@ pnpm --filter @bastion/web test:e2e
 | Arquivos | S3 ou compatível: RustFS no dev (ADR 9), via `@aws-sdk/client-s3` |
 | PDF | Playwright 1.65 (Chromium sem rede, ADR 13) |
 | Testes | Vitest 5.1 (unitários e de integração) + Playwright 1.65 (telas) |
-| Dev local | Docker Compose (Postgres, Redis, RustFS, alvo de teste) |
+| Dev local | Docker Compose (Postgres, Redis, RustFS, alvo de teste e alvo vulnerável de laboratório, Node puro, porta 8081, inseguro de propósito) |
 | Qualidade | ESLint 9 |
 
 ## 4. Arquitetura e decisões
@@ -252,6 +252,24 @@ Em texto: web ou CI chamam a API; a API enfileira a tarefa; o worker consome, pa
 | 14 | O usuário precisa saber na hora se a propriedade do sistema foi comprovada, mas a saída para a internet é só do worker | A API enfileira `verificar-propriedade` e **espera o retorno do job por até 20 s**, fora de qualquer transação. Depois grava o resultado no agregado `Sistema` | Resposta direta na tela. Se o worker estiver parado ou lento, a API responde 504 `VERIFICACAO_DEMOROU` |
 | 15 | Evidências são pequenas (requisição, resposta, observação) e o worker não deve receber credenciais do S3 | **Evidências inline**, até 8 KB por campo (com marca `[truncado]`), dentro do próprio achado. O S3 guarda só os PDFs | Uma peça a menos para operar e o worker continua sem acesso a dados. Evidências grandes (capturas, HAR) exigirão rever esta decisão |
 | 16 | Com a API pronta, o armazém fictício em memória não tem mais função e dobraria a lógica | **Remoção** de `apps/web/src/prototipo`: todas as telas consomem a API, e os mesmos contratos Zod tipam as duas pontas | Não há "modo demonstração": para demonstrar, use o semeador (`pnpm banco:semear`) |
+| 17 | Pentest autorizado exige ir além da análise passiva, sem risco para o alvo | **Perfis de avaliação ativos** `PADRAO`, `COMPLETO` e `IA`, com sondas não destrutivas. Exigem autorização por escrito do dono do sistema, consentimento explícito para criar dados, freios por perfil e disjuntor, e tudo é auditado | Mais poder, mais responsabilidade: sem autorização registrada o perfil não inicia. Avaliações ativas são mais lentas e geram mais tráfego no alvo |
+| 18 | Os módulos ativos precisam de um alvo para testes, mas apontá-los a sistemas reais seria arriscado | **Alvo vulnerável de laboratório** (`infra/alvo-de-teste/app-vulneravel`): Node puro, sem dependências, tudo simulado em memória, serviço `alvo-vulneravel` na porta 8081 | Falhas propositais: é fixture local de dev e testes, **jamais** vai para produção nem fica exposto à internet |
+| 19 | Credenciais de teste e cabeçalhos do conector de IA são segredos do cliente guardados no banco | Cifragem **AES-256-GCM** na API (`compartilhado/cifragem.ts`), formato `v1.<iv>.<tag>.<texto>` em base64url, chave em `CHAVE_DE_CIFRAGEM` (32 bytes). O domínio guarda só o valor opaco; a API decifra apenas ao montar a tarefa do worker, e a API nunca devolve esses segredos | Perder ou trocar a chave exige recadastrar credenciais e conectores. Em produção a variável é obrigatória; em dev há uma chave fixa pública |
+
+Como os perfis ativos chegam ao worker: ao solicitar a avaliação, a API confere a autorização e o perfil, monta o escopo (métodos permitidos, caminhos excluídos, teto de requisições, permissão de criação de dados) e, no `COMPLETO`, inclui a credencial de teste decifrada; no `IA`, o conector decifrado. Esses segredos seguem só pela fila e nunca vão para log, auditoria, DTO ou relatório.
+
+#### Segurança dos perfis ativos
+
+Salvaguardas valem para qualquer avaliação ativa:
+
+- **Escopo preso à propriedade verificada:** só se sonda o que pertence ao sistema com propriedade comprovada.
+- **Produção bloqueada:** o domínio de produção declarado segue na lista de bloqueio do Guardião (ADR 5).
+- **Não destrutivo por padrão:** as sondas apenas observam; nada é apagado ou alterado.
+- **Criação de dados só com consentimento:** exige autorização explícita e os valores criados levam marca identificável.
+- **Limites por perfil:** cada perfil tem teto de requisições, ritmo e duração.
+- **Disjuntor:** erros ou sinais de degradação do alvo interrompem a avaliação.
+- **Autorização por escrito obrigatória:** registrada antes de iniciar, e tudo fica na auditoria.
+- **Alvo de laboratório:** `alvo-vulneravel` (porta 8081) é inseguro de propósito, só para dev e testes; nunca em produção.
 
 ## 5. Escopo do MVP
 
@@ -347,13 +365,18 @@ Listas paginadas devolvem `{ "itens": [...], "proximaPagina": "<cursor>" | null 
 | `GET /v1/sistemas/{id}` | `LER` | Detalhe, com estado da verificação e última nota | `200 SistemaDto` |
 | `GET /v1/sistemas/{id}/verificacao` | `LER` | Token e instruções dos três métodos | `200 { metodo, token, registroDns, arquivo, cabecalho }` |
 | `POST /v1/sistemas/{id}/verificacao` | `VERIFICAR_SISTEMA` | Confere a prova de propriedade (corpo opcional `{ metodo }`); espera até 20 s | `200 { verificado, expiraEm, mensagem }` |
+| `PUT /v1/sistemas/{id}/credencial-de-teste` | `CADASTRAR_SISTEMA` | Define a conta de teste usada no perfil `COMPLETO` (`modo` `FORMULARIO\|JSON`, `urlDeLogin`, `campoUsuario`, `campoSenha`, `usuario`, `senha`, `indicadorDeSucesso`). Usuário e senha são cifrados | `200 SistemaDto` (só `credencialDeTeste { configurada, modo, urlDeLogin, indicadorDeSucesso }`) |
+| `DELETE /v1/sistemas/{id}/credencial-de-teste` | `CADASTRAR_SISTEMA` | Remove a credencial | `200 SistemaDto` |
+| `PUT /v1/sistemas/{id}/conector-de-ia` | `CADASTRAR_SISTEMA` | Configura como falar com o app de IA (`url` https, `cabecalhos?`, `modeloDoCorpo` com `{{mensagem}}`, `caminhoDaResposta`, `frasesSigilosas[]`). Só para `tipo` `APP_COM_IA` (senão 422). Cabeçalhos são cifrados | `200 SistemaDto` (só `conectorDeIa { configurado, url, caminhoDaResposta }`) |
+| `DELETE /v1/sistemas/{id}/conector-de-ia` | `CADASTRAR_SISTEMA` | Remove o conector | `200 SistemaDto` |
+| `PATCH /v1/sistemas/{id}/consentimento-de-dados` | `CADASTRAR_SISTEMA` | Registra o consentimento para criar dados de teste (`{ permitir: boolean }`) | `200 SistemaDto` (`permitirCriacaoDeDadosDeTeste`) |
 
 **Avaliações**
 
 | Rota | Permissão | Descrição | Resposta |
 |---|---|---|---|
 | `GET /v1/avaliacoes` | `LER` | Lista (`?sistemaId`, `?estado`, paginação) | página de `AvaliacaoDto` |
-| `POST /v1/avaliacoes` | `SOLICITAR_AVALIACAO` | Dispara (`sistemaId`, `perfil`, `notaMinima`) | `202 { id, estado }` |
+| `POST /v1/avaliacoes` | `SOLICITAR_AVALIACAO` | Dispara (`sistemaId`, `perfil` `PASSIVO\|PADRAO\|COMPLETO\|IA`, `notaMinima`, `autorizacao { responsavel, referencia }`, `permitirCriacaoDeDados`). Perfis ativos sem `autorizacao` dão 422 `AUTORIZACAO_OBRIGATORIA`; `IA` sem conector ou fora de `APP_COM_IA` dá 422 `PERFIL_INDISPONIVEL`; `permitirCriacaoDeDados` só vale no `COMPLETO` e exige o consentimento do sistema (422 `CONSENTIMENTO_AUSENTE`) | `202 { id, estado }` |
 | `GET /v1/avaliacoes/{id}` | `LER` | Estado, progresso, etapas, nota, `aprovada`, `relatorioId` e contagem de achados | `200 AvaliacaoDto` |
 | `GET /v1/avaliacoes/{id}/requisicoes` | `LER` | Requisições do Guardião, com decisão e motivo | `{ itens: RequisicaoDoGuardiaoDto[] }` |
 | `POST /v1/avaliacoes/{id}/parar` | `PARAR_AVALIACAO` | Cancela | `200 { estado: "CANCELADA" }` |
@@ -507,7 +530,11 @@ A conferência é feita pelo worker e a tela espera o resultado por até 20 s (A
 
 ### 8.4 Disparar uma avaliação e acompanhar ao vivo
 
-1. Em **Avaliações → Nova avaliação**, escolha um sistema verificado, o perfil (hoje só **Passivo** está disponível) e a **nota mínima** (0 a 100, padrão 70).
+1. Em **Avaliações → Nova avaliação**, escolha um sistema verificado, o perfil (**Passivo**, **Padrão**, **Completo** ou **IA**) e a **nota mínima** (0 a 100, padrão 70).
+   - Escolher um perfil **ativo** (Padrão, Completo, IA) exige **autorização por escrito**: informe o **responsável** e a **referência do escopo** autorizado. Ela fica registrada na avaliação e na auditoria.
+   - **Completo** usa a **credencial de teste** cadastrada no sistema (login por formulário; ela é cifrada e nunca é exibida de volta). Sem credencial, roda sem autenticação.
+   - **IA** exige um **conector configurado** num sistema do tipo **App com IA** (URL, modelo do corpo com `{{mensagem}}`, caminho da resposta).
+   - **Criar dados** de teste só acontece no Completo, com o **consentimento** registrado no sistema e marcado na solicitação.
 2. A avaliação entra na fila e a tela mostra, ao vivo, as etapas, o progresso, as **requisições do Guardião** (permitidas e bloqueadas, com o motivo) e os achados à medida que aparecem.
 3. O botão **Parar** cancela a avaliação a qualquer momento (a permissão é `PARAR_AVALIACAO`).
 4. Ao terminar, a avaliação mostra a nota, se foi **aprovada** (nota ≥ nota mínima) e o link do relatório.
