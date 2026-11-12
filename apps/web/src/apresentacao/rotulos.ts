@@ -73,8 +73,14 @@ export const rotuloDoMetodoDeVerificacao = (m: MetodoDeVerificacao): string =>
 export const rotuloDoEstadoDaVerificacao = (e: EstadoDaVerificacao): string =>
   ({ PENDENTE: "Pendente", VERIFICADO: "Verificado", FALHOU: "Falhou", EXPIRADO: "Expirado" })[e];
 
-export const rotuloDoPerfil = (p: PerfilDeAvaliacao): string =>
-  ({ PASSIVO: "Passivo", PADRAO: "Padrão", COMPLETO: "Completo" })[p];
+const ROTULOS_DE_PERFIL: Record<PerfilDeAvaliacao, string> = {
+  PASSIVO: "Passivo",
+  PADRAO: "Padrão",
+  COMPLETO: "Completo",
+  IA: "IA (chatbots e agentes)",
+};
+
+export const rotuloDoPerfil = (p: PerfilDeAvaliacao): string => ROTULOS_DE_PERFIL[p];
 
 export const ordemDasSeveridades: Severidade[] = ["CRITICA", "ALTA", "MEDIA", "BAIXA"];
 

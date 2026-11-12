@@ -65,6 +65,25 @@ test("fluxo principal: entrar, verificar, avaliar, abrir o relatório e confirma
   }
 });
 
+test("perfil Padrão exige a autorização antes de iniciar a avaliação", async ({ page }) => {
+  await entrar(page, "dono@exemplo.com.br");
+  await page.goto("/avaliacoes/nova");
+  await page.getByLabel("Sistema", { exact: true }).selectOption({ label: SISTEMA });
+  const iniciar = page.getByRole("button", { name: "Iniciar avaliação" });
+  await expect(iniciar).toBeEnabled();
+
+  await page.locator("#perfil-PADRAO").check();
+  await expect(page.getByRole("heading", { name: "Autorização" })).toBeVisible();
+  await expect(iniciar).toBeDisabled();
+
+  await page.getByLabel("Responsável pela autorização").fill("Maria da Silva");
+  await expect(iniciar).toBeDisabled();
+  await page.getByLabel(/Referência/).fill("Contrato 123/2026");
+  await expect(iniciar).toBeDisabled();
+  await page.getByLabel("Confirmo que tenho autorização por escrito para avaliar este sistema.").check();
+  await expect(iniciar).toBeEnabled();
+});
+
 test("o Leitor entra, mas não consegue iniciar uma avaliação", async ({ page }) => {
   await entrar(page, "leitor@exemplo.com.br");
   await page.goto("/avaliacoes/nova");

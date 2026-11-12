@@ -17,7 +17,7 @@ export class ErroDaApi extends Error {
   }
 }
 
-export type MetodoHttp = "GET" | "POST" | "PATCH" | "DELETE";
+export type MetodoHttp = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface OpcoesBase {
   metodo?: MetodoHttp;

@@ -13,6 +13,7 @@ import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
 import { formatarData } from "@/apresentacao/formatacao";
 import { rotuloDoTipoDeSistema } from "@/apresentacao/rotulos";
+import { ConfiguracaoDoSistema } from "./_componentes/ConfiguracaoDoSistema";
 import { InstrucoesDoSistema } from "./_componentes/InstrucoesDoSistema";
 
 interface Mensagem {
@@ -25,11 +26,16 @@ const PaginaDeSistemas = () => {
   const podeGerenciar = pode("sistemas");
   const { dados, erro, carregando, recarregar } = useConsulta(listarSistemas);
   const [expandidos, setExpandidos] = useState<string[]>([]);
+  const [configurando, setConfigurando] = useState<string[]>([]);
   const [verificando, setVerificando] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<Mensagem | null>(null);
 
   const alternar = (id: string): void => {
     setExpandidos((atual) => (atual.includes(id) ? atual.filter((i) => i !== id) : [...atual, id]));
+  };
+
+  const alternarConfiguracao = (id: string): void => {
+    setConfigurando((atual) => (atual.includes(id) ? atual.filter((i) => i !== id) : [...atual, id]));
   };
 
   const verificar = async (id: string, nome: string): Promise<void> => {
@@ -161,6 +167,14 @@ const PaginaDeSistemas = () => {
                               Nova avaliação
                             </Link>
                           ) : null}
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            aria-expanded={configurando.includes(s.id)}
+                            onClick={() => alternarConfiguracao(s.id)}
+                          >
+                            {configurando.includes(s.id) ? "Ocultar configuração" : "Configurar testes"}
+                          </button>
                         </div>
                         {emVerificacao ? (
                           <span className="hint">Consultando o ambiente; pode levar até 20 segundos.</span>
@@ -172,6 +186,13 @@ const PaginaDeSistemas = () => {
                         <td colSpan={8}>
                           {s.verificacao.mensagem ? <Alerta tipo="error">{s.verificacao.mensagem}</Alerta> : null}
                           <InstrucoesDoSistema sistemaId={s.id} />
+                        </td>
+                      </tr>
+                    ) : null}
+                    {configurando.includes(s.id) ? (
+                      <tr>
+                        <td colSpan={8}>
+                          <ConfiguracaoDoSistema sistema={s} podeGerenciar={podeGerenciar} aoAlterar={recarregar} />
                         </td>
                       </tr>
                     ) : null}

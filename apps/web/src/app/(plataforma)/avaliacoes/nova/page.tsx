@@ -17,18 +17,31 @@ import estilos from "./nova.module.css";
 interface OpcaoDePerfil {
   perfil: PerfilDeAvaliacao;
   descricao: string;
-  habilitado: boolean;
 }
 
 const PERFIS: OpcaoDePerfil[] = [
   {
     perfil: "PASSIVO",
     descricao: "Não intrusivo: cabeçalhos de segurança, TLS e certificado, flags de cookies e exposição de versão.",
-    habilitado: true,
   },
-  { perfil: "PADRAO", descricao: "Depois do MVP.", habilitado: false },
-  { perfil: "COMPLETO", descricao: "Depois do MVP.", habilitado: false },
+  {
+    perfil: "PADRAO",
+    descricao:
+      "Teste ativo não autenticado: mapeia páginas e verifica configurações expostas, CORS, métodos HTTP, redirecionamento aberto e entrada refletida.",
+  },
+  {
+    perfil: "COMPLETO",
+    descricao:
+      "Teste ativo autenticado (login de teste): inclui o Padrão e verifica controle de acesso e injeção. Requer credencial de teste no sistema.",
+  },
+  {
+    perfil: "IA",
+    descricao:
+      "Teste de chatbots/agentes (OWASP LLM): integridade do prompt, vazamento de informação e segurança da saída. Só para sistemas do tipo App com IA e com conector configurado.",
+  },
 ];
+
+const ehPerfilAtivo = (p: PerfilDeAvaliacao): boolean => p !== "PASSIVO";
 
 const FormularioDeNovaAvaliacao = () => {
   const router = useRouter();
@@ -45,8 +58,35 @@ const FormularioDeNovaAvaliacao = () => {
   const [erroGeral, setErroGeral] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
+  const [responsavel, setResponsavel] = useState("");
+  const [referencia, setReferencia] = useState("");
+  const [aceito, setAceito] = useState(false);
+  const [permitirCriacaoDeDados, setPermitirCriacaoDeDados] = useState(false);
+
   const sistemas = dados ?? [];
   const sistema = sistemaId ? sistemas.find((s) => s.id === sistemaId) : undefined;
+  const ativo = ehPerfilAtivo(perfil);
+  const autorizado = !ativo || (responsavel.trim() !== "" && referencia.trim() !== "" && aceito);
+
+  const motivoDeIndisponivel = (p: PerfilDeAvaliacao): string | null => {
+    if (p !== "IA") return null;
+    if (!sistema) return "Selecione um sistema do tipo App com IA.";
+    if (sistema.tipo !== "APP_COM_IA") return "Disponível só para sistemas do tipo App com IA.";
+    if (!sistema.conectorDeIa.configurado) return "Configure o conector de IA em Sistemas.";
+    return null;
+  };
+
+  const escolherSistema = (id: string): void => {
+    setSistemaId(id);
+    const novo = sistemas.find((s) => s.id === id);
+    const iaOk = novo?.tipo === "APP_COM_IA" && novo.conectorDeIa.configurado;
+    if (perfil === "IA" && !iaOk) setPerfil("PASSIVO");
+  };
+
+  const escolherPerfil = (p: PerfilDeAvaliacao): void => {
+    setPerfil(p);
+    if (p !== "COMPLETO") setPermitirCriacaoDeDados(false);
+  };
 
   const iniciar = async (evento: FormEvent<HTMLFormElement>): Promise<void> => {
     evento.preventDefault();
@@ -62,9 +102,16 @@ const FormularioDeNovaAvaliacao = () => {
     }
     setErros(encontrados);
     if (Object.keys(encontrados).length > 0 || !sistema) return;
+    if (!autorizado) return;
     setEnviando(true);
     try {
-      const resposta = await solicitarAvaliacao({ sistemaId: sistema.id, perfil, notaMinima: nota });
+      const resposta = await solicitarAvaliacao({
+        sistemaId: sistema.id,
+        perfil,
+        notaMinima: nota,
+        permitirCriacaoDeDados: perfil === "COMPLETO" && permitirCriacaoDeDados,
+        ...(ativo ? { autorizacao: { responsavel: responsavel.trim(), referencia: referencia.trim(), aceito: true as const } } : {}),
+      });
       router.push(`/avaliacoes/${resposta.id}`);
     } catch (erro) {
       setErroGeral(mensagemDoErro(erro));
@@ -83,7 +130,7 @@ const FormularioDeNovaAvaliacao = () => {
           <label className="label" htmlFor="sistema">
             Sistema
           </label>
-          <select id="sistema" className="input" value={sistemaId} onChange={(e) => setSistemaId(e.target.value)}>
+          <select id="sistema" className="input" value={sistemaId} onChange={(e) => escolherSistema(e.target.value)}>
             <option value="">{carregando && dados === null ? "Carregando sistemas..." : "Selecione um sistema"}</option>
             {sistemas.map((s) => {
               const verificado = s.verificacao.estado === "VERIFICADO";
@@ -108,10 +155,12 @@ const FormularioDeNovaAvaliacao = () => {
           <div className="grade-3">
             {PERFIS.map((p) => {
               const selecionado = perfil === p.perfil;
+              const indisponivel = motivoDeIndisponivel(p.perfil);
+              const habilitado = indisponivel === null;
               const classes = [
                 estilos.cartaoDePerfil,
                 selecionado ? estilos.selecionado : "",
-                p.habilitado ? "" : estilos.desabilitado,
+                habilitado ? "" : estilos.desabilitado,
               ].join(" ");
               return (
                 <label key={p.perfil} className={classes} htmlFor={`perfil-${p.perfil}`}>
@@ -121,13 +170,27 @@ const FormularioDeNovaAvaliacao = () => {
                     name="perfil"
                     value={p.perfil}
                     checked={selecionado}
-                    disabled={!p.habilitado}
-                    onChange={() => setPerfil(p.perfil)}
+                    disabled={!habilitado}
+                    onChange={() => escolherPerfil(p.perfil)}
                   />
                   <span>
                     <strong>{rotuloDoPerfil(p.perfil)}</strong>
                     <br />
                     <span className="texto-2">{p.descricao}</span>
+                    {indisponivel ? (
+                      <>
+                        <br />
+                        <span className="hint">{indisponivel}</span>
+                      </>
+                    ) : null}
+                    {p.perfil === "COMPLETO" && sistema && !sistema.credencialDeTeste.configurada ? (
+                      <>
+                        <br />
+                        <span className="hint">
+                          Sem credencial, o Completo roda sem autenticação. Configure a credencial em Sistemas.
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                 </label>
               );
@@ -162,6 +225,63 @@ const FormularioDeNovaAvaliacao = () => {
         </div>
       </div>
 
+      {ativo ? (
+        <div className="card pilha">
+          <h2 className="card-titulo">Autorização</h2>
+          <Alerta tipo="info">
+            O Bastion só avalia sistemas com propriedade comprovada e nunca avalia produção. Testes ativos enviam
+            requisições de ataque controladas ao ambiente de homologação.
+          </Alerta>
+          <div className="field">
+            <label className="label" htmlFor="autorizacao-responsavel">
+              Responsável pela autorização
+            </label>
+            <input
+              id="autorizacao-responsavel"
+              className="input"
+              type="text"
+              value={responsavel}
+              onChange={(e) => setResponsavel(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="autorizacao-referencia">
+              Referência (contrato/escopo autorizado)
+            </label>
+            <input
+              id="autorizacao-referencia"
+              className="input"
+              type="text"
+              value={referencia}
+              onChange={(e) => setReferencia(e.target.value)}
+            />
+          </div>
+          <label className="linha" htmlFor="autorizacao-aceito">
+            <input
+              id="autorizacao-aceito"
+              type="checkbox"
+              checked={aceito}
+              onChange={(e) => setAceito(e.target.checked)}
+            />
+            Confirmo que tenho autorização por escrito para avaliar este sistema.
+          </label>
+          {perfil === "COMPLETO" ? (
+            <div className="field">
+              <label className="linha" htmlFor="permitir-criacao">
+                <input
+                  id="permitir-criacao"
+                  type="checkbox"
+                  checked={permitirCriacaoDeDados}
+                  onChange={(e) => setPermitirCriacaoDeDados(e.target.checked)}
+                />
+                Permitir criação de registros de teste na homologação (apenas Completo)
+              </label>
+              <span className="hint">Os registros criados são marcados com o prefixo bastion-teste-.</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="card">
         <h2 className="card-titulo">Escopo autorizado</h2>
         {sistema ? (
@@ -185,7 +305,7 @@ const FormularioDeNovaAvaliacao = () => {
         <button
           type="submit"
           className="btn btn-cta"
-          disabled={!podeSolicitar || enviando}
+          disabled={!podeSolicitar || enviando || !autorizado}
           title={podeSolicitar ? undefined : TEXTO_SEM_PERMISSAO}
         >
           {enviando ? "Iniciando..." : "Iniciar avaliação"}
