@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useSessao } from "@/api/sessao";
-import { rotuloDoPapel } from "@/prototipo/rotulos";
+import { rotuloDoPapel } from "@/apresentacao/rotulos";
 import { Icone, type NomeDeIcone } from "./Icone";
 
 interface ItemDoMenu {

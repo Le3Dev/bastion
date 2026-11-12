@@ -8,8 +8,8 @@ import { alterarPapelDoMembro, convidarMembro, listarMembros, removerMembro } fr
 import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
 import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
-import { formatarData } from "@/prototipo/formatacao";
-import { rotuloDoPapel } from "@/prototipo/rotulos";
+import { formatarData } from "@/apresentacao/formatacao";
+import { rotuloDoPapel } from "@/apresentacao/rotulos";
 
 const REGEX_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PAPEIS_ATRIBUIVEIS = PAPEIS.filter((p) => p !== "DONO");

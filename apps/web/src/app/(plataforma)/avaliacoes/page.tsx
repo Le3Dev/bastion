@@ -1,40 +1,52 @@
 "use client";
 
+import type { EstadoDaAvaliacao } from "@bastion/contratos";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { listarAvaliacoes } from "@/api/avaliacoes";
+import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
+import { listarSistemas } from "@/api/sistemas";
+import { useConsulta } from "@/api/useConsulta";
+import { usePaginacao } from "@/api/usePaginacao";
+import { formatarDataHora } from "@/apresentacao/formatacao";
+import { estadosDaAvaliacaoDisponiveis, rotuloDoEstadoDaAvaliacao, rotuloDoPerfil } from "@/apresentacao/rotulos";
+import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
-import { sistemaPorId } from "@/prototipo/armazem";
-import { formatarDataHora } from "@/prototipo/formatacao";
-import { rotuloDoEstadoDaAvaliacao, rotuloDoPerfil } from "@/prototipo/rotulos";
-import type { EstadoDaAvaliacao } from "@/prototipo/tipos";
-import { useArmazem } from "@/prototipo/useArmazem";
 
-const ESTADOS: EstadoDaAvaliacao[] = [
-  "RASCUNHO",
-  "AGUARDANDO_VERIFICACAO",
-  "NA_FILA",
-  "PREPARANDO",
-  "EM_EXECUCAO",
-  "ANALISANDO",
-  "CONCLUIDA",
-  "FALHOU",
-  "CANCELADA",
-];
+const LIMITE = 20;
 
 const PaginaDeAvaliacoes = () => {
-  const estado = useArmazem();
+  const { pode } = useSessao();
   const [filtroDeEstado, setFiltroDeEstado] = useState<EstadoDaAvaliacao | "">("");
   const [filtroDeSistema, setFiltroDeSistema] = useState("");
+  const sistemas = useConsulta(listarSistemas);
 
-  const lista = useMemo(
-    () =>
-      estado.avaliacoes
-        .filter((a) => (filtroDeEstado === "" || a.estado === filtroDeEstado) && (filtroDeSistema === "" || a.sistemaId === filtroDeSistema))
-        .sort((a, b) => b.solicitadaEm.localeCompare(a.solicitadaEm)),
-    [estado.avaliacoes, filtroDeEstado, filtroDeSistema],
+  const lista = usePaginacao(
+    (pagina, sinal) =>
+      listarAvaliacoes(
+        {
+          estado: filtroDeEstado === "" ? undefined : filtroDeEstado,
+          sistemaId: filtroDeSistema === "" ? undefined : filtroDeSistema,
+          pagina,
+          limite: LIMITE,
+        },
+        sinal,
+      ),
+    `${filtroDeEstado}|${filtroDeSistema}`,
+  );
+
+  const podeSolicitar = pode("solicitarAvaliacao");
+  const botaoNova = podeSolicitar ? (
+    <Link href="/avaliacoes/nova" className="btn btn-cta">
+      Nova avaliação
+    </Link>
+  ) : (
+    <button type="button" className="btn btn-cta" disabled title={TEXTO_SEM_PERMISSAO}>
+      Nova avaliação
+    </button>
   );
 
   return (
@@ -42,12 +54,10 @@ const PaginaDeAvaliacoes = () => {
       <CabecalhoDaPagina
         titulo="Avaliações"
         descricao="Histórico e andamento das avaliações de segurança."
-        acoes={
-          <Link href="/avaliacoes/nova" className="btn btn-cta">
-            Nova avaliação
-          </Link>
-        }
+        acoes={botaoNova}
       />
+
+      {lista.erro ? <Alerta tipo="error">{lista.erro}</Alerta> : null}
 
       <div className="card">
         <div className="grade-2">
@@ -60,12 +70,12 @@ const PaginaDeAvaliacoes = () => {
               className="input"
               value={filtroDeEstado}
               onChange={(e) => {
-                const escolhido = ESTADOS.find((s) => s === e.target.value);
+                const escolhido = estadosDaAvaliacaoDisponiveis.find((s) => s === e.target.value);
                 setFiltroDeEstado(escolhido ?? "");
               }}
             >
               <option value="">Todos</option>
-              {ESTADOS.map((s) => (
+              {estadosDaAvaliacaoDisponiveis.map((s) => (
                 <option key={s} value={s}>
                   {rotuloDoEstadoDaAvaliacao(s)}
                 </option>
@@ -83,7 +93,7 @@ const PaginaDeAvaliacoes = () => {
               onChange={(e) => setFiltroDeSistema(e.target.value)}
             >
               <option value="">Todos</option>
-              {estado.sistemas.map((s) => (
+              {(sistemas.dados ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nome}
                 </option>
@@ -92,49 +102,65 @@ const PaginaDeAvaliacoes = () => {
           </div>
         </div>
 
-        {lista.length === 0 ? (
+        {lista.carregando && lista.itens.length === 0 ? (
+          <p className="texto-2">Carregando avaliações...</p>
+        ) : lista.itens.length === 0 ? (
           <EstadoVazio
             titulo="Nenhuma avaliação encontrada"
             descricao="Ajuste os filtros ou solicite uma nova avaliação."
             acao={
-              <Link href="/avaliacoes/nova" className="btn btn-cta">
-                Nova avaliação
-              </Link>
+              podeSolicitar ? (
+                <Link href="/avaliacoes/nova" className="btn btn-cta">
+                  Nova avaliação
+                </Link>
+              ) : undefined
             }
           />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Sistema</th>
-                <th>Perfil</th>
-                <th>Origem</th>
-                <th>Estado</th>
-                <th>Nota</th>
-                <th>Solicitada em</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {lista.map((a) => (
-                <tr key={a.id}>
-                  <td>{sistemaPorId(estado, a.sistemaId)?.nome ?? a.sistemaId}</td>
-                  <td>{rotuloDoPerfil(a.perfil)}</td>
-                  <td>{a.origem}</td>
-                  <td>
-                    <SeloDeEstado tipo="avaliacao" estado={a.estado} />
-                  </td>
-                  <td>
-                    <NotaDeSeguranca nota={a.nota} />
-                  </td>
-                  <td>{formatarDataHora(a.solicitadaEm)}</td>
-                  <td>
-                    <Link href={`/avaliacoes/${a.id}`}>Abrir</Link>
-                  </td>
+          <>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Sistema</th>
+                  <th>Perfil</th>
+                  <th>Origem</th>
+                  <th>Estado</th>
+                  <th>Nota</th>
+                  <th>Solicitada em</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lista.itens.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.sistemaNome}</td>
+                    <td>{rotuloDoPerfil(a.perfil)}</td>
+                    <td>{a.origem}</td>
+                    <td>
+                      <SeloDeEstado tipo="avaliacao" estado={a.estado} />
+                    </td>
+                    <td>
+                      <NotaDeSeguranca nota={a.nota} />
+                    </td>
+                    <td>{formatarDataHora(a.solicitadaEm)}</td>
+                    <td>
+                      <Link href={`/avaliacoes/${a.id}`}>Abrir</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {lista.temMais ? (
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={lista.carregandoMais}
+                onClick={() => void lista.carregarMais()}
+              >
+                {lista.carregandoMais ? "Carregando..." : "Carregar mais"}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
     </div>

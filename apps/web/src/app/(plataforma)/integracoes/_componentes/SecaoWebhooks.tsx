@@ -9,7 +9,7 @@ import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { Icone } from "@/componentes/Icone";
-import { formatarDataHora } from "@/prototipo/formatacao";
+import { formatarDataHora } from "@/apresentacao/formatacao";
 import { BotaoDeConfirmacao } from "./BotaoDeConfirmacao";
 import { exemploDeEntregaDoWebhook, exemploDeVerificacaoEmNode } from "./exemplos";
 

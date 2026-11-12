@@ -7,7 +7,7 @@ import { listarAuditoria, type FiltrosDeAuditoria } from "@/api/auditoria";
 import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
-import { formatarDataHora } from "@/prototipo/formatacao";
+import { formatarDataHora } from "@/apresentacao/formatacao";
 
 const POR_PAGINA = 20;
 

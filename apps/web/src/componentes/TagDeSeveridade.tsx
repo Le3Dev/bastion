@@ -1,5 +1,5 @@
-import { classeDaSeveridade, rotuloDaSeveridade } from "@/prototipo/rotulos";
-import type { Severidade } from "@/prototipo/tipos";
+import type { Severidade } from "@bastion/contratos";
+import { classeDaSeveridade, rotuloDaSeveridade } from "@/apresentacao/rotulos";
 
 interface PropsDaTag {
   severidade: Severidade;

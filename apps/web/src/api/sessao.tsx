@@ -8,13 +8,27 @@ import { ErroDaApi, foiCancelada, mensagemDoErro } from "./cliente";
 import { obterSessao, sair as encerrarSessao } from "./contas";
 
 /** Permissões de interface; o servidor continua sendo a fonte da verdade. */
-export type Permissao = "sistemas" | "membros" | "chaves" | "webhooks";
+export type Permissao =
+  | "sistemas"
+  | "membros"
+  | "chaves"
+  | "webhooks"
+  | "solicitarAvaliacao"
+  | "pararAvaliacao"
+  | "triarAchado"
+  | "aceitarRisco"
+  | "corrigirAchado";
 
 const PAPEIS_POR_PERMISSAO: Record<Permissao, readonly Papel[]> = {
   sistemas: ["DONO", "ADMIN", "ANALISTA"],
   membros: ["DONO", "ADMIN"],
   chaves: ["DONO", "ADMIN"],
   webhooks: ["DONO", "ADMIN"],
+  solicitarAvaliacao: ["DONO", "ADMIN", "ANALISTA", "DESENVOLVEDOR"],
+  pararAvaliacao: ["DONO", "ADMIN", "ANALISTA"],
+  triarAchado: ["DONO", "ADMIN", "ANALISTA"],
+  aceitarRisco: ["DONO", "ADMIN", "ANALISTA"],
+  corrigirAchado: ["DONO", "ADMIN", "ANALISTA", "DESENVOLVEDOR"],
 };
 
 export const TEXTO_SEM_PERMISSAO = "Seu papel não permite esta ação";

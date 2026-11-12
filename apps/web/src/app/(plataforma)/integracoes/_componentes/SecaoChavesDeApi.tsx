@@ -9,8 +9,8 @@ import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { Icone } from "@/componentes/Icone";
-import { formatarDataHora } from "@/prototipo/formatacao";
-import { rotuloDoPapel } from "@/prototipo/rotulos";
+import { formatarDataHora } from "@/apresentacao/formatacao";
+import { rotuloDoPapel } from "@/apresentacao/rotulos";
 import { BotaoDeConfirmacao } from "./BotaoDeConfirmacao";
 
 const PAPEIS_DA_CHAVE = PAPEIS.filter((p) => p !== "DONO");

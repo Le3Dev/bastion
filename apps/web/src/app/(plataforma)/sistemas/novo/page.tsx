@@ -15,13 +15,13 @@ import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
 import { cadastrarSistema, verificarPropriedade } from "@/api/sistemas";
 import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
-import { formatarData } from "@/prototipo/formatacao";
+import { formatarData } from "@/apresentacao/formatacao";
 import {
   metodosDeVerificacaoDisponiveis,
   rotuloDoMetodoDeVerificacao,
   rotuloDoTipoDeSistema,
   tiposDeSistemaDisponiveis,
-} from "@/prototipo/rotulos";
+} from "@/apresentacao/rotulos";
 import { InstrucoesDeVerificacao } from "../_componentes/InstrucoesDeVerificacao";
 
 const DESCRICAO_DOS_METODOS: Record<MetodoDeVerificacao, string> = {

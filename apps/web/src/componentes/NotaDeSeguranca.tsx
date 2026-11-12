@@ -1,4 +1,4 @@
-import { faixaDaNota } from "@/prototipo/nota";
+import { faixaDaNota } from "@/apresentacao/nota";
 
 interface PropsDaNota {
   nota: number | null;

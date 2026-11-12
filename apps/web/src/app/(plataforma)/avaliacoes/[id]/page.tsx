@@ -1,8 +1,20 @@
 "use client";
 
+import type { EstadoDaAvaliacao } from "@bastion/contratos";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { pararAvaliacao } from "@/api/avaliacoes";
+import { mensagemDoErro } from "@/api/cliente";
+import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
+import { useAoVivo } from "@/api/useAoVivo";
+import { formatarHora, formatarDataHora } from "@/apresentacao/formatacao";
+import {
+  ehEstadoFinalDaAvaliacao,
+  rotuloDoEstadoDaAvaliacao,
+  rotuloDoEstadoDaEtapa,
+  rotuloDoPerfil,
+} from "@/apresentacao/rotulos";
 import { Alerta } from "@/componentes/Alerta";
 import { BarraDeProgresso } from "@/componentes/BarraDeProgresso";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
@@ -10,24 +22,7 @@ import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
 import { TagDeSeveridade } from "@/componentes/TagDeSeveridade";
-import {
-  achadosDaAvaliacao,
-  avaliacaoPorId,
-  avancarSimulacao,
-  pararAvaliacao,
-  relatorioDaAvaliacao,
-  sistemaPorId,
-} from "@/prototipo/armazem";
-import { NOMES_DAS_ETAPAS } from "@/prototipo/dados-ficticios/avaliacoes";
-import { mensagemDeErro } from "@/prototipo/erros";
-import { formatarDataHora } from "@/prototipo/formatacao";
-import { ehEstadoFinalDaAvaliacao } from "@/prototipo/maquinas-de-estado";
-import { rotuloDoEstadoDaAvaliacao, rotuloDoPerfil } from "@/prototipo/rotulos";
-import type { EstadoDaAvaliacao, EstadoDaEtapa } from "@/prototipo/tipos";
-import { useArmazem } from "@/prototipo/useArmazem";
 import estilos from "./ao-vivo.module.css";
-
-const INTERVALO_DA_SIMULACAO_MS = 700;
 
 const LINHA_DO_TEMPO: EstadoDaAvaliacao[] = [
   "RASCUNHO",
@@ -39,98 +34,77 @@ const LINHA_DO_TEMPO: EstadoDaAvaliacao[] = [
   "CONCLUIDA",
 ];
 
-const ROTULO_DA_ETAPA: Record<EstadoDaEtapa, string> = {
-  PENDENTE: "Pendente",
-  EM_EXECUCAO: "Em execução",
-  CONCLUIDA: "Concluída",
-  FALHOU: "Falhou",
-  IGNORADA: "Ignorada",
-};
+const MAXIMO_DE_LINHAS_DO_LOG = 200;
 
-const PaginaDaAvaliacaoAoVivo = () => {
-  const { id } = useParams<{ id: string }>();
-  const estado = useArmazem();
+const AvaliacaoAoVivo = ({ id }: { id: string }) => {
+  const { pode } = useSessao();
+  const { avaliacao, requisicoes, achados, erro: erroAoVivo } = useAoVivo(id);
   const [confirmandoParada, setConfirmandoParada] = useState(false);
+  const [parando, setParando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [avisoDeParada, setAvisoDeParada] = useState(false);
 
-  const avaliacao = avaliacaoPorId(estado, id);
-  const final = avaliacao ? ehEstadoFinalDaAvaliacao(avaliacao.estado) : true;
-  const existe = avaliacao !== undefined;
-
-  useEffect(() => {
-    if (!existe || final) return undefined;
-    const intervalo = window.setInterval(() => {
-      try {
-        avancarSimulacao(id);
-      } catch (e) {
-        setErro(mensagemDeErro(e));
-        window.clearInterval(intervalo);
-      }
-    }, INTERVALO_DA_SIMULACAO_MS);
-    return () => window.clearInterval(intervalo);
-  }, [id, existe, final]);
-
-  const derivados = useMemo(() => {
-    if (!avaliacao) return null;
-    const permitidas = avaliacao.requisicoesDoGuardiao.filter((r) => r.decisao === "PERMITIDA").length;
-    return {
-      sistema: sistemaPorId(estado, avaliacao.sistemaId),
-      achados: achadosDaAvaliacao(estado, avaliacao.id),
-      relatorio: relatorioDaAvaliacao(estado, avaliacao.id),
-      permitidas,
-      bloqueadas: avaliacao.requisicoesDoGuardiao.length - permitidas,
-    };
-  }, [estado, avaliacao]);
-
-  if (!avaliacao || !derivados) {
+  if (!avaliacao) {
     return (
-      <div className="page">
-        <EstadoVazio
-          titulo="Avaliação não encontrada"
-          descricao="O identificador informado não corresponde a nenhuma avaliação."
-          acao={
-            <Link href="/avaliacoes" className="btn btn-outline">
-              Voltar para avaliações
-            </Link>
-          }
-        />
+      <div className="page pilha">
+        {erroAoVivo ? (
+          <>
+            <Alerta tipo="error">{erroAoVivo}</Alerta>
+            <EstadoVazio
+              titulo="Não foi possível carregar a avaliação"
+              acao={
+                <Link href="/avaliacoes" className="btn btn-outline">
+                  Voltar para avaliações
+                </Link>
+              }
+            />
+          </>
+        ) : (
+          <p className="texto-2" role="status">
+            Carregando avaliação...
+          </p>
+        )}
       </div>
     );
   }
 
-  const { sistema, achados, relatorio, permitidas, bloqueadas } = derivados;
+  const final = ehEstadoFinalDaAvaliacao(avaliacao.estado);
+  const podeParar = pode("pararAvaliacao");
+  const permitidas = requisicoes.filter((r) => r.decisao === "PERMITIDA").length;
+  const bloqueadas = requisicoes.length - permitidas;
+  const requisicoesOrdenadas = [...requisicoes].sort((a, b) => a.em.localeCompare(b.em)).slice(-MAXIMO_DE_LINHAS_DO_LOG);
 
-  const parar = (): void => {
+  const parar = async (): Promise<void> => {
     if (!confirmandoParada) {
       setConfirmandoParada(true);
       return;
     }
+    setConfirmandoParada(false);
+    setParando(true);
+    setErro(null);
     try {
-      pararAvaliacao(avaliacao.id);
-      setErro(null);
+      await pararAvaliacao(avaliacao.id);
+      setAvisoDeParada(true);
     } catch (e) {
-      setErro(mensagemDeErro(e));
+      setErro(mensagemDoErro(e));
     } finally {
-      setConfirmandoParada(false);
+      setParando(false);
     }
   };
 
-  const terminouComFalhaOuCancelamento = avaliacao.estado === "FALHOU" || avaliacao.estado === "CANCELADA";
-  const indiceAtual = LINHA_DO_TEMPO.indexOf(avaliacao.estado);
-  const alcancado = terminouComFalhaOuCancelamento
-    ? LINHA_DO_TEMPO.indexOf(avaliacao.iniciadaEm ? "PREPARANDO" : "NA_FILA")
-    : indiceAtual;
-  const etapasDaLinha: EstadoDaAvaliacao[] = terminouComFalhaOuCancelamento
-    ? [...LINHA_DO_TEMPO.slice(0, alcancado + 1), avaliacao.estado]
+  const terminouSemConcluir = avaliacao.estado === "FALHOU" || avaliacao.estado === "CANCELADA";
+  const ultimoAlcancado = LINHA_DO_TEMPO.indexOf(avaliacao.iniciadaEm ? "PREPARANDO" : "NA_FILA");
+  const etapasDaLinha: EstadoDaAvaliacao[] = terminouSemConcluir
+    ? [...LINHA_DO_TEMPO.slice(0, ultimoAlcancado + 1), avaliacao.estado]
     : LINHA_DO_TEMPO;
-
-  const aprovada = avaliacao.nota !== null && avaliacao.nota >= avaliacao.notaMinima;
+  const indiceAtual = etapasDaLinha.indexOf(avaliacao.estado);
+  const aprovada = avaliacao.aprovada ?? (avaliacao.nota !== null && avaliacao.nota >= avaliacao.notaMinima);
 
   return (
     <div className="page-wide pilha">
       <CabecalhoDaPagina
         titulo="Avaliação"
-        descricao={`${sistema?.nome ?? avaliacao.sistemaId} · perfil ${rotuloDoPerfil(avaliacao.perfil)} · origem ${avaliacao.origem}`}
+        descricao={`${avaliacao.sistemaNome} · perfil ${rotuloDoPerfil(avaliacao.perfil)} · origem ${avaliacao.origem}`}
         acoes={
           <Link href="/avaliacoes" className="btn btn-outline">
             Todas as avaliações
@@ -139,6 +113,15 @@ const PaginaDaAvaliacaoAoVivo = () => {
       />
 
       {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
+      {erroAoVivo ? <Alerta tipo="warning">{erroAoVivo}</Alerta> : null}
+      {avisoDeParada && !final ? <Alerta tipo="info">Parada solicitada. Aguardando o encerramento da avaliação.</Alerta> : null}
+
+      {avaliacao.estado === "AGUARDANDO_VERIFICACAO" ? (
+        <Alerta tipo="warning">
+          A propriedade do sistema ainda não foi verificada, então a avaliação não pode começar.{" "}
+          <Link href="/sistemas">Verifique o sistema em Sistemas</Link>.
+        </Alerta>
+      ) : null}
 
       <div className="card pilha">
         <div className={estilos.cabecalho}>
@@ -149,7 +132,14 @@ const PaginaDaAvaliacaoAoVivo = () => {
             </div>
           </div>
           {!final ? (
-            <button type="button" className="btn btn-danger" onClick={parar}>
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={!podeParar || parando}
+              title={podeParar ? undefined : TEXTO_SEM_PERMISSAO}
+              onClick={() => void parar()}
+              onBlur={() => setConfirmandoParada(false)}
+            >
               {confirmandoParada ? "Confirmar parada" : "Parar avaliação"}
             </button>
           ) : null}
@@ -164,7 +154,7 @@ const PaginaDaAvaliacaoAoVivo = () => {
         <ol className="passos">
           {etapasDaLinha.map((e, i) => {
             const atual = e === avaliacao.estado;
-            const concluido = !atual && i < etapasDaLinha.indexOf(avaliacao.estado);
+            const concluido = !atual && i < indiceAtual;
             return (
               <li
                 key={e}
@@ -180,15 +170,21 @@ const PaginaDaAvaliacaoAoVivo = () => {
 
       <div className="card">
         <h2 className="card-titulo">Etapas</h2>
-        <div className="pilha" aria-live="polite">
-          {avaliacao.etapas.map((et, i) => (
-            <div key={et.id} className={estilos.etapa}>
-              <span>{NOMES_DAS_ETAPAS[i] ?? et.nome}</span>
-              <span className="texto-2">{ROTULO_DA_ETAPA[et.estado]}</span>
-              <BarraDeProgresso valor={et.progresso} />
-            </div>
-          ))}
-        </div>
+        {avaliacao.etapas.length === 0 ? (
+          <EstadoVazio titulo="As etapas aparecem quando a avaliação começar" />
+        ) : (
+          <div className="pilha" aria-live="polite">
+            {[...avaliacao.etapas]
+              .sort((a, b) => a.ordem - b.ordem)
+              .map((et) => (
+                <div key={et.ordem} className={estilos.etapa}>
+                  <span>{et.nome}</span>
+                  <span className="texto-2">{rotuloDoEstadoDaEtapa(et.estado)}</span>
+                  <BarraDeProgresso valor={et.progresso} />
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -201,7 +197,7 @@ const PaginaDaAvaliacaoAoVivo = () => {
             Bloqueadas: <span className="mono tag tag-critica">{bloqueadas}</span>
           </span>
         </div>
-        {avaliacao.requisicoesDoGuardiao.length === 0 ? (
+        {requisicoesOrdenadas.length === 0 ? (
           <EstadoVazio titulo="Nenhuma requisição registrada ainda" />
         ) : (
           <table className="table">
@@ -216,9 +212,9 @@ const PaginaDaAvaliacaoAoVivo = () => {
               </tr>
             </thead>
             <tbody>
-              {avaliacao.requisicoesDoGuardiao.map((r) => (
+              {requisicoesOrdenadas.map((r) => (
                 <tr key={r.id} className={r.decisao === "BLOQUEADA" ? estilos.linhaBloqueada : undefined}>
-                  <td>{formatarDataHora(r.em)}</td>
+                  <td>{formatarHora(r.em)}</td>
                   <td className="mono">{r.metodo}</td>
                   <td className="mono">{r.url}</td>
                   <td>
@@ -275,13 +271,13 @@ const PaginaDaAvaliacaoAoVivo = () => {
             </span>
           </div>
           {aprovada ? (
-            <Alerta tipo="success">A nota atingiu a mínima: a avaliação passou no critério do pipeline de CI.</Alerta>
+            <Alerta tipo="success">Avaliação aprovada: a nota atingiu a mínima exigida.</Alerta>
           ) : (
-            <Alerta tipo="warning">A nota ficou abaixo da mínima: a avaliação reprova o pipeline de CI.</Alerta>
+            <Alerta tipo="warning">Avaliação reprovada: a nota ficou abaixo da mínima e reprova o pipeline de CI.</Alerta>
           )}
-          {relatorio ? (
+          {avaliacao.relatorioId ? (
             <div>
-              <Link href={`/relatorios/${relatorio.id}`} className="btn btn-cta">
+              <Link href={`/relatorios/${avaliacao.relatorioId}`} className="btn btn-cta">
                 Ver relatório
               </Link>
             </div>
@@ -289,13 +285,16 @@ const PaginaDaAvaliacaoAoVivo = () => {
         </div>
       ) : null}
 
-      {avaliacao.estado === "FALHOU" ? (
-        <Alerta tipo="error">{avaliacao.motivoDaFalha ?? "A avaliação falhou."}</Alerta>
-      ) : null}
+      {avaliacao.estado === "FALHOU" ? <Alerta tipo="error">{avaliacao.motivoDaFalha ?? "A avaliação falhou."}</Alerta> : null}
 
       {avaliacao.estado === "CANCELADA" ? <Alerta tipo="warning">Avaliação cancelada.</Alerta> : null}
     </div>
   );
+};
+
+const PaginaDaAvaliacaoAoVivo = () => {
+  const { id } = useParams<{ id: string }>();
+  return <AvaliacaoAoVivo key={id} id={id} />;
 };
 
 export default PaginaDaAvaliacaoAoVivo;

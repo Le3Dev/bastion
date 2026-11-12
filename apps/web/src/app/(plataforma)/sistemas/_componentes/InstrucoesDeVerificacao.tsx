@@ -2,7 +2,7 @@
 
 import type { InstrucoesDeVerificacaoDto } from "@bastion/contratos";
 import { useState } from "react";
-import { rotuloDoMetodoDeVerificacao } from "@/prototipo/rotulos";
+import { rotuloDoMetodoDeVerificacao } from "@/apresentacao/rotulos";
 
 interface PropsDasInstrucoes {
   instrucoes: InstrucoesDeVerificacaoDto;

@@ -11,8 +11,8 @@ import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
-import { formatarData } from "@/prototipo/formatacao";
-import { rotuloDoTipoDeSistema } from "@/prototipo/rotulos";
+import { formatarData } from "@/apresentacao/formatacao";
+import { rotuloDoTipoDeSistema } from "@/apresentacao/rotulos";
 import { InstrucoesDoSistema } from "./_componentes/InstrucoesDoSistema";
 
 interface Mensagem {
