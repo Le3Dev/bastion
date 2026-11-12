@@ -43,7 +43,7 @@ Pré-requisito extra: **Docker Desktop** em execução.
 cp .env.example .env      # valores só de desenvolvimento
 pnpm infra:subir          # Postgres, Redis, armazenamento S3 e alvo de teste
 pnpm banco:migrar         # migrações geradas + SQL manual (RLS, permissões, auditoria)
-pnpm banco:semear         # dados iniciais (o semeador chega na leva 2)
+pnpm banco:semear         # dados iniciais (idempotente; credenciais abaixo)
 pnpm dev                  # web (3000), API (3333) e worker
 pnpm test                 # testes de todos os pacotes
 pnpm infra:parar          # derruba os contêineres (os volumes ficam)
@@ -59,6 +59,22 @@ pnpm infra:parar          # derruba os contêineres (os volumes ficam)
 | 8443 / 8080 | Alvo de teste (HTTPS / HTTP) |
 
 API e worker rodam no host; o Compose só sobe a infraestrutura de desenvolvimento.
+
+**Credenciais do semeador** (só desenvolvimento). O `pnpm banco:semear` cria a "Organização Exemplo" e o sistema "Alvo de teste local" (`https://localhost:8443`, domínio de produção declarado `producao.exemplo.com.br`, verificação por arquivo `.well-known`). O token de verificação é gravado em `infra/alvo-de-teste/publico/.well-known/bastion-verificacao.txt`.
+
+| Papel | E-mail | Senha |
+|---|---|---|
+| DONO | `dono@exemplo.com.br` | `bastion-demo-123` |
+| ANALISTA | `analista@exemplo.com.br` | `bastion-demo-123` |
+| LEITOR | `leitor@exemplo.com.br` | `bastion-demo-123` |
+
+**Testes de integração da API** (precisam do Postgres do Compose, migrado com `pnpm banco:migrar:teste`):
+
+```bash
+pnpm --filter @bastion/api test:integracao   # usa o banco bastion_teste (DATABASE_URL_TESTE e DATABASE_URL_TESTE_MIGRACAO do .env)
+```
+
+Eles sobem a API com `app.inject` e filas falsas (sem Redis), esvaziam as tabelas a cada teste com o papel migrador e dependem de `.env` na raiz. Os testes unitários (`pnpm test`) não precisam de banco.
 
 **Alvo de teste.** `https://localhost:8443` (e `http://localhost:8080`) é um nginx **propositalmente mal configurado**, o único alvo dos testes ponta a ponta. Usa certificado autoassinado de 20 dias e tem falhas de propósito: versão do servidor exposta, `X-Powered-By` vazando a versão do PHP, cookie sem `HttpOnly`, `Secure` e `SameSite`, e nenhum cabeçalho de segurança (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy). Os testes gravam `bastion-verificacao.txt` em `infra/alvo-de-teste/publico/.well-known/`. Como ele roda em rede privada, o `.env` traz `GUARDIAO_PERMITIR_REDES_PRIVADAS=true`, que é **só para dev e proibido em produção**.
 
