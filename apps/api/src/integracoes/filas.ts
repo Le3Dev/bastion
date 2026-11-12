@@ -8,6 +8,7 @@ import {
 } from '@bastion/contratos';
 import { Queue, QueueEvents } from 'bullmq';
 import { Redis } from 'ioredis';
+import { z } from 'zod';
 
 /** A fila não devolveu o resultado dentro do prazo (o worker pode estar parado). */
 export class ErroDeTempoEsgotadoDaFila extends Error {
@@ -17,11 +18,39 @@ export class ErroDeTempoEsgotadoDaFila extends Error {
   }
 }
 
+/** Fila interna, processada pela própria API: tarefas atrasadas de vigilância (prazos). */
+export const FILA_DE_VIGILANCIA = 'vigilancia';
+
+export type TarefaDeVigilancia =
+  | { tipo: 'tempo-limite-da-avaliacao'; avaliacaoId: string; organizacaoId: string }
+  | { tipo: 'vencimento-do-risco'; achadoId: string; organizacaoId: string };
+
+export const TarefaDeVigilanciaEsquema = z.discriminatedUnion('tipo', [
+  z.object({
+    tipo: z.literal('tempo-limite-da-avaliacao'),
+    avaliacaoId: z.string(),
+    organizacaoId: z.string(),
+  }),
+  z.object({
+    tipo: z.literal('vencimento-do-risco'),
+    achadoId: z.string(),
+    organizacaoId: z.string(),
+  }),
+]) satisfies z.ZodType<TarefaDeVigilancia>;
+
+/** Id determinístico: repetir o mesmo agendamento (mesma tarefa e atraso) não duplica o job. */
+export const idDaVigilancia = (tarefa: TarefaDeVigilancia, atrasoMs: number): string => {
+  const alvo = tarefa.tipo === 'tempo-limite-da-avaliacao' ? tarefa.avaliacaoId : tarefa.achadoId;
+  return `${tarefa.tipo}-${alvo}-${Math.round(atrasoMs)}`;
+};
+
 /** Fachada para o worker: o resto da API só conhece esta interface (camada anticorrupção). */
 export interface Filas {
   enfileirarVerificacao(tarefa: TarefaVerificarPropriedade): Promise<ResultadoDaVerificacao>;
   enfileirarAvaliacao(tarefa: TarefaExecutarAvaliacao): Promise<void>;
   enfileirarEntregaDeWebhook(tarefa: TarefaEntregarWebhook): Promise<void>;
+  /** Agenda uma verificação de prazo para daqui a `atrasoMs` (fila `vigilancia`, tratada pela API). */
+  agendarVigilancia(tarefa: TarefaDeVigilancia, atrasoMs: number): Promise<void>;
   /** Grava o sinal de cancelamento no Redis (TTL de 1 hora); o worker o consulta entre requisições. */
   sinalizarCancelamento(avaliacaoId: string): Promise<void>;
   /** Falha se o Redis não responder. */
@@ -42,12 +71,13 @@ export const criarFilas = (redisUrl: string): Filas => {
   const filaDeVerificacoes = new Queue(FILAS.verificacoes, { connection: conexao });
   const filaDeAvaliacoes = new Queue(FILAS.avaliacoes, { connection: conexao });
   const filaDeWebhooks = new Queue(FILAS.webhooks, { connection: conexao });
+  const filaDeVigilancia = new Queue(FILA_DE_VIGILANCIA, { connection: conexao });
   const eventosDeVerificacoes = new QueueEvents(FILAS.verificacoes, { connection: conexao });
   const redis = new Redis(redisUrl, { lazyConnect: false, maxRetriesPerRequest: 2 });
   redis.on('error', () => {
     // Os erros aparecem nas chamadas (saúde, cancelamento); evita "unhandled error event".
   });
-  for (const fila of [filaDeVerificacoes, filaDeAvaliacoes, filaDeWebhooks]) {
+  for (const fila of [filaDeVerificacoes, filaDeAvaliacoes, filaDeWebhooks, filaDeVigilancia]) {
     fila.on('error', () => undefined);
   }
   eventosDeVerificacoes.on('error', () => undefined);
@@ -92,6 +122,17 @@ export const criarFilas = (redisUrl: string): Filas => {
       });
     },
 
+    async agendarVigilancia(tarefa, atrasoMs) {
+      await filaDeVigilancia.add('vigiar', tarefa, {
+        jobId: idDaVigilancia(tarefa, atrasoMs),
+        delay: Math.max(0, Math.round(atrasoMs)),
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: 100,
+      });
+    },
+
     async sinalizarCancelamento(avaliacaoId) {
       await redis.set(chaveDeCancelamento(avaliacaoId), '1', 'EX', TTL_DO_CANCELAMENTO_EM_SEGUNDOS);
     },
@@ -105,6 +146,7 @@ export const criarFilas = (redisUrl: string): Filas => {
         filaDeVerificacoes.close(),
         filaDeAvaliacoes.close(),
         filaDeWebhooks.close(),
+        filaDeVigilancia.close(),
         eventosDeVerificacoes.close(),
       ]);
       redis.disconnect();

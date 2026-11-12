@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type {
+  EventoAoVivo,
   ResultadoDaVerificacao,
   TarefaEntregarWebhook,
   TarefaExecutarAvaliacao,
@@ -8,7 +9,13 @@ import type {
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { criarAplicacao } from '../../aplicacao';
-import type { Filas } from '../../integracoes/filas';
+import type {
+  AoVivo,
+  CancelarAssinatura,
+  OuvinteAoVivo,
+} from '../../avaliacoes/infraestrutura/ao-vivo';
+import type { Armazenamento } from '../../integracoes/armazenamento';
+import type { Filas, TarefaDeVigilancia } from '../../integracoes/filas';
 import { criarConexao, type Banco } from '../banco/conexao';
 import type { Config } from '../config';
 import { relogioDoSistema } from '../relogio';
@@ -28,6 +35,9 @@ export class FilasFalsas implements Filas {
   avaliacoes: TarefaExecutarAvaliacao[] = [];
   entregas: TarefaEntregarWebhook[] = [];
   cancelamentos: string[] = [];
+  vigilancias: { tarefa: TarefaDeVigilancia; atrasoMs: number }[] = [];
+  /** Quando preenchido, `enfileirarAvaliacao` falha com este erro (simula a fila fora do ar). */
+  erroAoEnfileirarAvaliacao: Error | null = null;
 
   async enfileirarVerificacao(tarefa: TarefaVerificarPropriedade): Promise<ResultadoDaVerificacao> {
     this.verificacoes.push(tarefa);
@@ -35,10 +45,14 @@ export class FilasFalsas implements Filas {
     return this.resultadoDaVerificacao;
   }
   async enfileirarAvaliacao(tarefa: TarefaExecutarAvaliacao): Promise<void> {
+    if (this.erroAoEnfileirarAvaliacao) throw this.erroAoEnfileirarAvaliacao;
     this.avaliacoes.push(tarefa);
   }
   async enfileirarEntregaDeWebhook(tarefa: TarefaEntregarWebhook): Promise<void> {
     this.entregas.push(tarefa);
+  }
+  async agendarVigilancia(tarefa: TarefaDeVigilancia, atrasoMs: number): Promise<void> {
+    this.vigilancias.push({ tarefa, atrasoMs });
   }
   async sinalizarCancelamento(avaliacaoId: string): Promise<void> {
     this.cancelamentos.push(avaliacaoId);
@@ -47,10 +61,53 @@ export class FilasFalsas implements Filas {
   async fechar(): Promise<void> {}
 }
 
+/** Armazenamento em memória: guarda os objetos enviados, por chave. */
+export class ArmazenamentoEmMemoria implements Armazenamento {
+  readonly objetos = new Map<string, { corpo: Uint8Array; tipo: string }>();
+
+  async garantirBucket(): Promise<void> {}
+  async enviar(chave: string, corpo: Uint8Array | string, tipo: string): Promise<void> {
+    this.objetos.set(chave, {
+      corpo: typeof corpo === 'string' ? new TextEncoder().encode(corpo) : corpo,
+      tipo,
+    });
+  }
+  async obter(chave: string): Promise<Uint8Array> {
+    const objeto = this.objetos.get(chave);
+    if (!objeto) throw new Error(`Objeto inexistente no armazenamento de teste: ${chave}.`);
+    return objeto.corpo;
+  }
+  fechar(): void {}
+}
+
+/** Ao vivo em memória: entrega os eventos aos ouvintes do mesmo processo e guarda o histórico. */
+export class AoVivoEmMemoria implements AoVivo {
+  readonly publicados: { avaliacaoId: string; evento: EventoAoVivo }[] = [];
+  private readonly ouvintes = new Map<string, Set<OuvinteAoVivo>>();
+
+  async publicarAoVivo(avaliacaoId: string, evento: EventoAoVivo): Promise<void> {
+    this.publicados.push({ avaliacaoId, evento });
+    for (const ouvinte of [...(this.ouvintes.get(avaliacaoId) ?? [])]) ouvinte(evento);
+  }
+  async assinar(avaliacaoId: string, ouvinte: OuvinteAoVivo): Promise<CancelarAssinatura> {
+    const conjunto = this.ouvintes.get(avaliacaoId) ?? new Set<OuvinteAoVivo>();
+    conjunto.add(ouvinte);
+    this.ouvintes.set(avaliacaoId, conjunto);
+    return async () => {
+      conjunto.delete(ouvinte);
+    };
+  }
+  async fechar(): Promise<void> {
+    this.ouvintes.clear();
+  }
+}
+
 export interface AmbienteDeTeste {
   app: FastifyInstance;
   db: Banco;
   filas: FilasFalsas;
+  armazenamento: ArmazenamentoEmMemoria;
+  aoVivo: AoVivoEmMemoria;
   /** Esvazia todas as tabelas (conexão do migrador, dono das tabelas). */
   limpar(): Promise<void>;
   encerrar(): Promise<void>;
@@ -86,13 +143,24 @@ export const criarAmbienteDeTeste = async (): Promise<AmbienteDeTeste> => {
   const conexao = criarConexao(urlDoApp);
   const migrador = new pg.Pool({ connectionString: urlDoMigrador, max: 2 });
   const filas = new FilasFalsas();
-  const app = await criarAplicacao({ config, db: conexao.db, filas, relogio: relogioDoSistema });
+  const armazenamento = new ArmazenamentoEmMemoria();
+  const aoVivo = new AoVivoEmMemoria();
+  const app = await criarAplicacao({
+    config,
+    db: conexao.db,
+    filas,
+    relogio: relogioDoSistema,
+    armazenamento,
+    aoVivo,
+  });
   await app.ready();
 
   return {
     app,
     db: conexao.db,
     filas,
+    armazenamento,
+    aoVivo,
     limpar: async () => {
       await migrador.query(
         'TRUNCATE organizacoes, usuarios, sessoes, chaves_de_api, eventos_de_saida, eventos_processados CASCADE',

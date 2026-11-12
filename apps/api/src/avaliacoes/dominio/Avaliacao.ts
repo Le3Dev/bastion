@@ -40,6 +40,8 @@ export interface DadosDaAvaliacao {
   readonly iniciadaEm: Date | null;
   readonly concluidaEm: Date | null;
   readonly motivoDaFalha: string | null;
+  /** Achado que esta avaliação revalida (avaliação de revalidação); ausente nas demais. */
+  readonly achadoRevalidadoId?: Identificador | null;
 }
 
 export interface ParametrosDeSolicitacao {
@@ -52,6 +54,7 @@ export interface ParametrosDeSolicitacao {
   readonly origem: OrigemDaAvaliacao;
   readonly solicitadaPor: string;
   readonly sistemaVerificado: boolean;
+  readonly achadoRevalidadoId?: Identificador | null;
 }
 
 /** Agregado raiz: só ele muda o próprio estado. */
@@ -76,6 +79,7 @@ export class Avaliacao {
       | 'origem'
       | 'solicitadaPor'
       | 'solicitadaEm'
+      | 'achadoRevalidadoId'
     >,
     private readonly _agenda: Agenda,
     etapas: Etapa[],
@@ -120,6 +124,7 @@ export class Avaliacao {
         origem: parametros.origem,
         solicitadaPor: parametros.solicitadaPor,
         solicitadaEm: agora,
+        achadoRevalidadoId: parametros.achadoRevalidadoId ?? null,
       },
       parametros.agenda,
       etapas,
@@ -154,6 +159,7 @@ export class Avaliacao {
         origem: dados.origem,
         solicitadaPor: dados.solicitadaPor,
         solicitadaEm: dados.solicitadaEm,
+        achadoRevalidadoId: dados.achadoRevalidadoId ?? null,
       },
       Agenda.reconstituir(dados.agenda),
       dados.etapas.map((etapa) => Etapa.reconstituir(etapa)),
@@ -184,6 +190,10 @@ export class Avaliacao {
 
   get notaMinima(): number {
     return this.dados.notaMinima;
+  }
+
+  get achadoRevalidadoId(): Identificador | null {
+    return this.dados.achadoRevalidadoId ?? null;
   }
 
   get estado(): EstadoDaAvaliacao {
@@ -302,6 +312,7 @@ export class Avaliacao {
       iniciadaEm: this._iniciadaEm,
       concluidaEm: this._concluidaEm,
       motivoDaFalha: this._motivoDaFalha,
+      achadoRevalidadoId: this.achadoRevalidadoId,
     };
   }
 

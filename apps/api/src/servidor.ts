@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { criarAplicacao } from './aplicacao';
+import { criarAoVivo } from './avaliacoes/infraestrutura/ao-vivo';
 import { criarConexao } from './compartilhado/banco/conexao';
 import { carregarConfig } from './compartilhado/config';
 import { PublicadorDoOutbox } from './compartilhado/outbox/outbox';
@@ -7,6 +8,7 @@ import { relogioDoSistema } from './compartilhado/relogio';
 import { criarArmazenamento } from './integracoes/armazenamento';
 import { iniciarConsumidorDeResultados } from './integracoes/consumidor-de-resultados';
 import { criarFilas } from './integracoes/filas';
+import { iniciarProcessadorDeVigilancia } from './integracoes/vigilancia';
 
 const enderecoSemSegredo = (url: string): string => {
   try {
@@ -51,13 +53,31 @@ async function principal(): Promise<void> {
     );
   }
 
-  const app = await criarAplicacao({ config, db: conexao.db, filas, relogio: relogioDoSistema });
+  const aoVivo = criarAoVivo(config.redisUrl);
+  const app = await criarAplicacao({
+    config,
+    db: conexao.db,
+    filas,
+    relogio: relogioDoSistema,
+    armazenamento,
+    aoVivo,
+  });
   const publicador = new PublicadorDoOutbox(conexao.db, relogioDoSistema, (mensagem, erro) =>
     app.log.error({ err: erro }, mensagem),
   );
   publicador.iniciar();
   const consumidor = iniciarConsumidorDeResultados(conexao.db, config.redisUrl, (mensagem, erro) =>
     app.log.error({ err: erro }, mensagem),
+  );
+  const vigilancia = iniciarProcessadorDeVigilancia(
+    {
+      verificarTempoLimiteDaAvaliacao: (organizacaoId, avaliacaoId) =>
+        app.servicos.avaliacoes.verificarTempoLimite(organizacaoId, avaliacaoId),
+      verificarVencimentoDoRisco: (organizacaoId, achadoId) =>
+        app.servicos.achados.verificarVencimentoDoRisco(organizacaoId, achadoId),
+    },
+    config.redisUrl,
+    (mensagem, erro) => app.log.error({ err: erro }, mensagem),
   );
 
   let encerrando = false;
@@ -68,7 +88,9 @@ async function principal(): Promise<void> {
     try {
       await publicador.parar();
       await consumidor.fechar();
+      await vigilancia.fechar();
       await app.close();
+      await aoVivo.fechar();
       await filas.fechar();
       armazenamento.fechar();
       await conexao.fechar();
