@@ -1,90 +1,160 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { RegistroDeAuditoriaDto } from "@bastion/contratos";
+import { useState, type FormEvent } from "react";
+import { mensagemDoErro } from "@/api/cliente";
+import { listarAuditoria, type FiltrosDeAuditoria } from "@/api/auditoria";
+import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { formatarDataHora } from "@/prototipo/formatacao";
-import type { RegistroDeAuditoria } from "@/prototipo/tipos";
 
-interface PropsDaAba {
-  registros: RegistroDeAuditoria[];
-}
+const POR_PAGINA = 20;
 
-const POR_PAGINA = 15;
-
-const rotuloDoTipoDoAtor = (tipo: RegistroDeAuditoria["ator"]["tipo"]): string =>
+const rotuloDoTipoDoAtor = (tipo: RegistroDeAuditoriaDto["ator"]["tipo"]): string =>
   ({ USUARIO: "Usuário", SISTEMA: "Sistema", CHAVE_DE_API: "Chave de API" })[tipo];
 
-export const AbaAuditoria = ({ registros }: PropsDaAba) => {
+const resumirDetalhe = (detalhe: RegistroDeAuditoriaDto["detalhe"]): string => {
+  if (detalhe === null) return "-";
+  return Object.entries(detalhe)
+    .map(([chave, valor]) => `${chave}: ${typeof valor === "string" ? valor : JSON.stringify(valor)}`)
+    .join(", ");
+};
+
+interface PropsDaLista {
+  filtros: FiltrosDeAuditoria;
+}
+
+/** Remontado (via key) a cada novo conjunto de filtros, o que zera as páginas já acumuladas. */
+const ListaDeAuditoria = ({ filtros }: PropsDaLista) => {
+  const primeira = useConsulta((sinal) => listarAuditoria({ ...filtros, limite: POR_PAGINA }, sinal));
+  const [extras, setExtras] = useState<RegistroDeAuditoriaDto[]>([]);
+  const [cursor, setCursor] = useState<string | null | undefined>(undefined);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const [erroAoCarregarMais, setErroAoCarregarMais] = useState<string | null>(null);
+
+  const proximaPagina = cursor === undefined ? (primeira.dados?.proximaPagina ?? null) : cursor;
+  const registros = [...(primeira.dados?.itens ?? []), ...extras];
+
+  const carregarMais = async (): Promise<void> => {
+    if (proximaPagina === null) return;
+    setErroAoCarregarMais(null);
+    setCarregandoMais(true);
+    try {
+      const pagina = await listarAuditoria({ ...filtros, limite: POR_PAGINA, pagina: proximaPagina });
+      setExtras((atual) => [...atual, ...pagina.itens]);
+      setCursor(pagina.proximaPagina);
+    } catch (e) {
+      setErroAoCarregarMais(mensagemDoErro(e));
+    } finally {
+      setCarregandoMais(false);
+    }
+  };
+
+  return (
+    <div className="card pilha">
+      {primeira.erro ? <Alerta tipo="error">{primeira.erro}</Alerta> : null}
+      {erroAoCarregarMais ? <Alerta tipo="error">{erroAoCarregarMais}</Alerta> : null}
+      {primeira.carregando ? (
+        <p className="texto-2">Carregando registros...</p>
+      ) : registros.length === 0 ? (
+        <EstadoVazio titulo="Nenhum registro encontrado" descricao="Ajuste os filtros para ver outros registros." />
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Data e hora</th>
+              <th>Ator</th>
+              <th>Ação</th>
+              <th>Alvo</th>
+              <th>Detalhe</th>
+            </tr>
+          </thead>
+          <tbody>
+            {registros.map((r) => (
+              <tr key={r.id}>
+                <td className="mono texto-2">{formatarDataHora(r.em)}</td>
+                <td>
+                  <div>{r.ator.nome}</div>
+                  <div className="texto-muted">{rotuloDoTipoDoAtor(r.ator.tipo)}</div>
+                </td>
+                <td className="mono">{r.acao}</td>
+                <td className="mono texto-2">{r.alvo}</td>
+                <td className="texto-2">{resumirDetalhe(r.detalhe)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="linha" style={{ justifyContent: "space-between" }}>
+        <span className="texto-2">
+          {registros.length} {registros.length === 1 ? "registro carregado" : "registros carregados"}
+        </span>
+        {proximaPagina !== null && !primeira.carregando ? (
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={carregandoMais}
+            onClick={() => void carregarMais()}
+          >
+            {carregandoMais ? "Carregando..." : "Carregar mais"}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+export const AbaAuditoria = () => {
   const [ator, setAtor] = useState("");
   const [acao, setAcao] = useState("");
   const [busca, setBusca] = useState("");
-  const [pagina, setPagina] = useState(1);
+  const [aplicados, setAplicados] = useState<FiltrosDeAuditoria>({});
+  const [rodada, setRodada] = useState(0);
 
-  const atores = useMemo(() => [...new Set(registros.map((r) => r.ator.nome))].sort((a, b) => a.localeCompare(b)), [registros]);
-  const acoes = useMemo(() => [...new Set(registros.map((r) => r.acao))].sort((a, b) => a.localeCompare(b)), [registros]);
+  const aoFiltrar = (evento: FormEvent<HTMLFormElement>): void => {
+    evento.preventDefault();
+    setAplicados({ ator: ator.trim(), acao: acao.trim(), busca: busca.trim() });
+    setRodada((r) => r + 1);
+  };
 
-  const filtrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    return registros.filter((r) => {
-      if (ator !== "" && r.ator.nome !== ator) return false;
-      if (acao !== "" && r.acao !== acao) return false;
-      if (termo !== "" && !`${r.alvo} ${r.detalhe ?? ""} ${r.acao} ${r.ator.nome}`.toLowerCase().includes(termo)) return false;
-      return true;
-    });
-  }, [registros, ator, acao, busca]);
-
-  const totalDePaginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
-  const paginaAtual = Math.min(pagina, totalDePaginas);
-  const visiveis = filtrados.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA);
+  const aoLimpar = (): void => {
+    setAtor("");
+    setAcao("");
+    setBusca("");
+    setAplicados({});
+    setRodada((r) => r + 1);
+  };
 
   return (
     <div className="pilha">
-      <Alerta tipo="info">Registros só de inclusão: não podem ser editados nem apagados.</Alerta>
+      <Alerta tipo="info">Registros somente de inclusão: não podem ser editados nem apagados.</Alerta>
 
-      <div className="card">
+      <form className="card" onSubmit={aoFiltrar}>
         <div className="grade-3">
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="auditoria-ator">
               Ator
             </label>
-            <select
+            <input
               id="auditoria-ator"
               className="input"
+              placeholder="Nome ou identificador"
               value={ator}
-              onChange={(e) => {
-                setAtor(e.target.value);
-                setPagina(1);
-              }}
-            >
-              <option value="">Todos</option>
-              {atores.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+              onChange={(e) => setAtor(e.target.value)}
+            />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="auditoria-acao">
               Ação
             </label>
-            <select
+            <input
               id="auditoria-acao"
-              className="input"
+              className="input mono"
+              placeholder="Ex.: sistema.cadastrado"
               value={acao}
-              onChange={(e) => {
-                setAcao(e.target.value);
-                setPagina(1);
-              }}
-            >
-              <option value="">Todas</option>
-              {acoes.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+              onChange={(e) => setAcao(e.target.value)}
+            />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="auditoria-busca">
@@ -96,69 +166,21 @@ export const AbaAuditoria = ({ registros }: PropsDaAba) => {
               className="input"
               placeholder="Alvo ou detalhe"
               value={busca}
-              onChange={(e) => {
-                setBusca(e.target.value);
-                setPagina(1);
-              }}
+              onChange={(e) => setBusca(e.target.value)}
             />
           </div>
         </div>
-      </div>
-
-      <div className="card pilha">
-        {visiveis.length === 0 ? (
-          <EstadoVazio titulo="Nenhum registro encontrado" descricao="Ajuste os filtros para ver outros registros." />
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Data e hora</th>
-                <th>Ator</th>
-                <th>Ação</th>
-                <th>Alvo</th>
-                <th>Detalhe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visiveis.map((r) => (
-                <tr key={r.id}>
-                  <td className="mono texto-2">{formatarDataHora(r.em)}</td>
-                  <td>
-                    <div>{r.ator.nome}</div>
-                    <div className="texto-muted">{rotuloDoTipoDoAtor(r.ator.tipo)}</div>
-                  </td>
-                  <td className="mono">{r.acao}</td>
-                  <td className="mono texto-2">{r.alvo}</td>
-                  <td className="texto-2">{r.detalhe ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <div className="linha" style={{ justifyContent: "space-between" }}>
-          <span className="texto-2">
-            {filtrados.length} {filtrados.length === 1 ? "registro" : "registros"} - página {paginaAtual} de {totalDePaginas}
-          </span>
-          <div className="linha">
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              disabled={paginaAtual <= 1}
-              onClick={() => setPagina(paginaAtual - 1)}
-            >
-              Anterior
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              disabled={paginaAtual >= totalDePaginas}
-              onClick={() => setPagina(paginaAtual + 1)}
-            >
-              Próxima
-            </button>
-          </div>
+        <div className="linha" style={{ marginTop: "var(--esp-3)" }}>
+          <button type="submit" className="btn btn-cta btn-sm">
+            Filtrar
+          </button>
+          <button type="button" className="btn btn-outline btn-sm" onClick={aoLimpar}>
+            Limpar filtros
+          </button>
         </div>
-      </div>
+      </form>
+
+      <ListaDeAuditoria key={rodada} filtros={aplicados} />
     </div>
   );
 };

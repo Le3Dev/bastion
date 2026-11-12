@@ -2,17 +2,18 @@
 
 import Link from "next/link";
 import { Fragment, useState } from "react";
+import { mensagemDoErro } from "@/api/cliente";
+import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
+import { listarSistemas, verificarPropriedade } from "@/api/sistemas";
+import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
-import { verificarPropriedade } from "@/prototipo/armazem";
-import { mensagemDeErro } from "@/prototipo/erros";
 import { formatarData } from "@/prototipo/formatacao";
 import { rotuloDoTipoDeSistema } from "@/prototipo/rotulos";
-import { useArmazem } from "@/prototipo/useArmazem";
-import { InstrucoesDeVerificacao } from "./_componentes/InstrucoesDeVerificacao";
+import { InstrucoesDoSistema } from "./_componentes/InstrucoesDoSistema";
 
 interface Mensagem {
   tipo: "success" | "error";
@@ -20,22 +21,36 @@ interface Mensagem {
 }
 
 const PaginaDeSistemas = () => {
-  const estado = useArmazem();
+  const { pode } = useSessao();
+  const podeGerenciar = pode("sistemas");
+  const { dados, erro, carregando, recarregar } = useConsulta(listarSistemas);
   const [expandidos, setExpandidos] = useState<string[]>([]);
+  const [verificando, setVerificando] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<Mensagem | null>(null);
 
   const alternar = (id: string): void => {
     setExpandidos((atual) => (atual.includes(id) ? atual.filter((i) => i !== id) : [...atual, id]));
   };
 
-  const verificar = (id: string, nome: string): void => {
+  const verificar = async (id: string, nome: string): Promise<void> => {
+    setMensagem(null);
+    setVerificando(id);
     try {
-      verificarPropriedade(id);
-      setMensagem({ tipo: "success", texto: `Propriedade de "${nome}" verificada com sucesso.` });
-    } catch (erro) {
-      setMensagem({ tipo: "error", texto: `${nome}: ${mensagemDeErro(erro)}` });
+      const resposta = await verificarPropriedade(id);
+      setMensagem(
+        resposta.verificado
+          ? { tipo: "success", texto: `Propriedade de "${nome}" verificada com sucesso.` }
+          : { tipo: "error", texto: `${nome}: ${resposta.mensagem ?? "A verificação não encontrou a prova de propriedade."}` },
+      );
+      recarregar();
+    } catch (e) {
+      setMensagem({ tipo: "error", texto: `${nome}: ${mensagemDoErro(e)}` });
+    } finally {
+      setVerificando(null);
     }
   };
+
+  const sistemas = dados ?? [];
 
   return (
     <div className="page-wide pilha">
@@ -43,9 +58,15 @@ const PaginaDeSistemas = () => {
         titulo="Sistemas"
         descricao="Sistemas cadastrados e o estado da verificação de propriedade."
         acoes={
-          <Link href="/sistemas/novo" className="btn btn-cta">
-            Cadastrar sistema
-          </Link>
+          podeGerenciar ? (
+            <Link href="/sistemas/novo" className="btn btn-cta">
+              Cadastrar sistema
+            </Link>
+          ) : (
+            <button type="button" className="btn btn-cta" disabled title={TEXTO_SEM_PERMISSAO}>
+              Cadastrar sistema
+            </button>
+          )
         }
       />
 
@@ -54,16 +75,21 @@ const PaginaDeSistemas = () => {
       </Alerta>
 
       <div aria-live="polite">{mensagem ? <Alerta tipo={mensagem.tipo}>{mensagem.texto}</Alerta> : null}</div>
+      {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
 
       <div className="card">
-        {estado.sistemas.length === 0 ? (
+        {carregando && dados === null ? (
+          <p className="texto-2">Carregando sistemas...</p>
+        ) : sistemas.length === 0 ? (
           <EstadoVazio
             titulo="Nenhum sistema cadastrado"
             descricao="Cadastre um sistema e comprove a propriedade para avaliá-lo."
             acao={
-              <Link href="/sistemas/novo" className="btn btn-cta">
-                Cadastrar sistema
-              </Link>
+              podeGerenciar ? (
+                <Link href="/sistemas/novo" className="btn btn-cta">
+                  Cadastrar sistema
+                </Link>
+              ) : undefined
             }
           />
         ) : (
@@ -81,9 +107,11 @@ const PaginaDeSistemas = () => {
               </tr>
             </thead>
             <tbody>
-              {estado.sistemas.map((s) => {
-                const pendente = s.verificacao.estado === "PENDENTE" || s.verificacao.estado === "FALHOU";
+              {sistemas.map((s) => {
+                const estado = s.verificacao.estado;
+                const precisaVerificar = estado === null || estado === "PENDENTE" || estado === "FALHOU" || estado === "EXPIRADO";
                 const aberto = expandidos.includes(s.id);
+                const emVerificacao = verificando === s.id;
                 return (
                   <Fragment key={s.id}>
                     <tr>
@@ -92,10 +120,14 @@ const PaginaDeSistemas = () => {
                       <td className="mono">{s.urlDeHomologacao}</td>
                       <td>
                         <div className="mono">{s.dominioDeProducao}</div>
-                        <span className="tag tag-critica">Bloqueado no Guardião</span>
+                        <span className="tag tag-critica">Bloqueado pelo Guardião</span>
                       </td>
                       <td>
-                        <SeloDeEstado tipo="verificacao" estado={s.verificacao.estado} />
+                        {estado ? (
+                          <SeloDeEstado tipo="verificacao" estado={estado} />
+                        ) : (
+                          <span className="tag tag-neutra">Sem verificação</span>
+                        )}
                       </td>
                       <td>{s.verificacao.expiraEm ? formatarData(s.verificacao.expiraEm) : "—"}</td>
                       <td>
@@ -103,10 +135,16 @@ const PaginaDeSistemas = () => {
                       </td>
                       <td>
                         <div className="linha">
-                          {pendente ? (
+                          {precisaVerificar ? (
                             <>
-                              <button type="button" className="btn btn-cta btn-sm" onClick={() => verificar(s.id, s.nome)}>
-                                Verificar agora
+                              <button
+                                type="button"
+                                className="btn btn-cta btn-sm"
+                                disabled={!podeGerenciar || verificando !== null}
+                                title={podeGerenciar ? undefined : TEXTO_SEM_PERMISSAO}
+                                onClick={() => void verificar(s.id, s.nome)}
+                              >
+                                {emVerificacao ? "Verificando..." : "Verificar agora"}
                               </button>
                               <button
                                 type="button"
@@ -118,19 +156,22 @@ const PaginaDeSistemas = () => {
                               </button>
                             </>
                           ) : null}
-                          {s.verificacao.estado === "VERIFICADO" ? (
+                          {estado === "VERIFICADO" ? (
                             <Link href={`/avaliacoes/nova?sistemaId=${s.id}`} className="btn btn-outline btn-sm">
                               Nova avaliação
                             </Link>
                           ) : null}
                         </div>
+                        {emVerificacao ? (
+                          <span className="hint">Consultando o ambiente; pode levar até 20 segundos.</span>
+                        ) : null}
                       </td>
                     </tr>
-                    {pendente && aberto ? (
+                    {precisaVerificar && aberto ? (
                       <tr>
                         <td colSpan={8}>
                           {s.verificacao.mensagem ? <Alerta tipo="error">{s.verificacao.mensagem}</Alerta> : null}
-                          <InstrucoesDeVerificacao sistema={s} />
+                          <InstrucoesDoSistema sistemaId={s.id} />
                         </td>
                       </tr>
                     ) : null}

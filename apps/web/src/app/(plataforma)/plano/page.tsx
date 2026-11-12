@@ -1,24 +1,32 @@
 "use client";
 
+import { obterPlano } from "@/api/contas";
+import { useSessao } from "@/api/sessao";
+import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { BarraDeProgresso } from "@/componentes/BarraDeProgresso";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
-import { EstadoVazio } from "@/componentes/EstadoVazio";
-import { formatarMoeda } from "@/prototipo/formatacao";
-import { useArmazem } from "@/prototipo/useArmazem";
 
 const LIMITE_DE_ALERTA = 80;
 
 const percentual = (uso: number, limite: number): number => (limite > 0 ? Math.round((uso / limite) * 100) : 0);
 
 const PaginaDoPlano = () => {
-  const { plano, organizacao } = useArmazem();
+  const { organizacao } = useSessao();
+  const { dados: plano, erro, carregando } = useConsulta(obterPlano);
 
-  const consumos = [
-    { chave: "sistemas", rotulo: "Sistemas", uso: plano.uso.sistemas, limite: plano.limites.sistemas },
-    { chave: "avaliacoes", rotulo: "Avaliações no mês", uso: plano.uso.avaliacoesPorMes, limite: plano.limites.avaliacoesPorMes },
-    { chave: "membros", rotulo: "Membros", uso: plano.uso.membros, limite: plano.limites.membros },
-  ].map((c) => ({ ...c, pct: percentual(c.uso, c.limite) }));
+  const consumos = plano
+    ? [
+        { chave: "sistemas", rotulo: "Sistemas", uso: plano.uso.sistemas, limite: plano.limites.sistemas },
+        {
+          chave: "avaliacoes",
+          rotulo: "Avaliações no mês",
+          uso: plano.uso.avaliacoesNoMes,
+          limite: plano.limites.avaliacoesPorMes,
+        },
+        { chave: "membros", rotulo: "Membros", uso: plano.uso.membros, limite: plano.limites.membros },
+      ].map((c) => ({ ...c, pct: percentual(c.uso, c.limite) }))
+    : [];
 
   const proximosDoLimite = consumos.filter((c) => c.pct > LIMITE_DE_ALERTA);
 
@@ -26,65 +34,41 @@ const PaginaDoPlano = () => {
     <div className="page pilha">
       <CabecalhoDaPagina
         titulo="Plano e cobrança"
-        descricao="Consumo da organização e histórico de faturas."
+        descricao="Consumo da organização em relação aos limites do plano."
         acoes={
-          <div className="pilha" style={{ gap: "var(--esp-1)" }}>
-            <button type="button" className="btn btn-outline" disabled>
-              Alterar plano
-            </button>
-          </div>
+          <button type="button" className="btn btn-outline" disabled>
+            Alterar plano
+          </button>
         }
       />
 
-      <Alerta tipo="info">Cobrança real fora do MVP: valores fictícios.</Alerta>
+      <Alerta tipo="info">Cobrança real fora do MVP: não há faturas nem pagamento nesta versão.</Alerta>
+      {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
 
-      <div className="card kpi">
-        <span className="kpi-rotulo">Plano atual</span>
-        <span className="kpi-valor">{plano.nome}</span>
-        <span className="texto-2">{organizacao.nome}</span>
-      </div>
+      {carregando && !plano ? <p className="texto-2">Carregando plano...</p> : null}
 
-      <div className="card pilha">
-        <h2 className="card-titulo">Uso e limites</h2>
-        {proximosDoLimite.length > 0 ? (
-          <Alerta tipo="warning">
-            Você está acima de {LIMITE_DE_ALERTA}% do limite em: {proximosDoLimite.map((c) => c.rotulo.toLowerCase()).join(", ")}.
-          </Alerta>
-        ) : null}
-        {consumos.map((c) => (
-          <BarraDeProgresso key={c.chave} valor={c.pct} rotulo={`${c.rotulo}: ${c.uso} de ${c.limite}`} />
-        ))}
-      </div>
+      {plano ? (
+        <>
+          <div className="card kpi">
+            <span className="kpi-rotulo">Plano atual</span>
+            <span className="kpi-valor">{plano.nome}</span>
+            <span className="texto-2">{organizacao.nome}</span>
+          </div>
 
-      <div className="card">
-        <h2 className="card-titulo">Faturas</h2>
-        {plano.faturas.length === 0 ? (
-          <EstadoVazio titulo="Nenhuma fatura ainda" />
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Competência</th>
-                <th>Valor</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plano.faturas.map((f) => (
-                <tr key={f.id}>
-                  <td>{f.competencia}</td>
-                  <td className="mono">{formatarMoeda(f.valor)}</td>
-                  <td>
-                    <span className={f.estado === "PAGA" ? "tag tag-sucesso" : "tag tag-alta"}>
-                      {f.estado === "PAGA" ? "Paga" : "Em aberto"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+          <div className="card pilha">
+            <h2 className="card-titulo">Uso e limites</h2>
+            {proximosDoLimite.length > 0 ? (
+              <Alerta tipo="warning">
+                Você está acima de {LIMITE_DE_ALERTA}% do limite em:{" "}
+                {proximosDoLimite.map((c) => c.rotulo.toLowerCase()).join(", ")}.
+              </Alerta>
+            ) : null}
+            {consumos.map((c) => (
+              <BarraDeProgresso key={c.chave} valor={c.pct} rotulo={`${c.rotulo}: ${c.uso} de ${c.limite}`} />
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 };

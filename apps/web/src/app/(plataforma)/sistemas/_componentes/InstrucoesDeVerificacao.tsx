@@ -1,43 +1,46 @@
 "use client";
 
+import type { InstrucoesDeVerificacaoDto } from "@bastion/contratos";
 import { useState } from "react";
 import { rotuloDoMetodoDeVerificacao } from "@/prototipo/rotulos";
-import type { Sistema } from "@/prototipo/tipos";
 
 interface PropsDasInstrucoes {
-  sistema: Sistema;
+  instrucoes: InstrucoesDeVerificacaoDto;
 }
 
-/** O token do armazém já vem no formato "bastion-verificacao=<código>". */
-const montarInstrucao = (sistema: Sistema): { passo: string; conteudo: string } => {
-  const host = new URL(sistema.urlDeHomologacao).hostname;
-  const { metodo, token } = sistema.verificacao;
-  if (metodo === "DNS_TXT") {
+const montarInstrucao = (instrucoes: InstrucoesDeVerificacaoDto): { passo: string; conteudo: string; copiavel: string } => {
+  if (instrucoes.metodo === "DNS_TXT") {
+    const { nome, valor } = instrucoes.registroDns;
     return {
-      passo: `Crie um registro DNS do tipo TXT em _bastion-verificacao.${host} com o valor abaixo.`,
-      conteudo: `Nome:  _bastion-verificacao.${host}\nTipo:  TXT\nValor: ${token}`,
+      passo: `Crie um registro DNS do tipo TXT em ${nome} com o valor abaixo.`,
+      conteudo: `Nome:  ${nome}\nTipo:  TXT\nValor: ${valor}`,
+      copiavel: valor,
     };
   }
-  if (metodo === "ARQUIVO_WELL_KNOWN") {
+  if (instrucoes.metodo === "ARQUIVO_WELL_KNOWN") {
+    const { url, conteudo } = instrucoes.arquivo;
     return {
-      passo: `Publique em https://${host}/.well-known/bastion-verificacao.txt um arquivo contendo exatamente o token abaixo.`,
-      conteudo: token,
+      passo: `Publique em ${url} um arquivo contendo exatamente o texto abaixo.`,
+      conteudo,
+      copiavel: conteudo,
     };
   }
+  const { nome, valor } = instrucoes.cabecalho;
   return {
-    passo: `Faça a URL de homologação (${sistema.urlDeHomologacao}) responder com o cabeçalho abaixo.`,
-    conteudo: `X-Bastion-Verificacao: ${token}`,
+    passo: "Faça o ambiente de homologação responder com o cabeçalho HTTP abaixo.",
+    conteudo: `${nome}: ${valor}`,
+    copiavel: valor,
   };
 };
 
-export const InstrucoesDeVerificacao = ({ sistema }: PropsDasInstrucoes) => {
+export const InstrucoesDeVerificacao = ({ instrucoes }: PropsDasInstrucoes) => {
   const [copiado, setCopiado] = useState(false);
   const [erroAoCopiar, setErroAoCopiar] = useState<string | null>(null);
-  const instrucao = montarInstrucao(sistema);
+  const instrucao = montarInstrucao(instrucoes);
 
   const copiar = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(sistema.verificacao.token);
+      await navigator.clipboard.writeText(instrucao.copiavel);
       setErroAoCopiar(null);
       setCopiado(true);
       window.setTimeout(() => setCopiado(false), 2000);
@@ -50,12 +53,12 @@ export const InstrucoesDeVerificacao = ({ sistema }: PropsDasInstrucoes) => {
   return (
     <div className="pilha">
       <p className="texto-2">
-        Método: {rotuloDoMetodoDeVerificacao(sistema.verificacao.metodo)}. {instrucao.passo}
+        Método: {rotuloDoMetodoDeVerificacao(instrucoes.metodo)}. {instrucao.passo}
       </p>
       <pre className="bloco-codigo">{instrucao.conteudo}</pre>
       <div className="linha">
         <button type="button" className="btn btn-outline btn-sm" onClick={() => void copiar()}>
-          Copiar token
+          Copiar valor
         </button>
         <span className="texto-2" aria-live="polite">
           {copiado ? "Copiado" : ""}
