@@ -11,10 +11,19 @@ import {
 } from '../comum';
 import { AchadoResumoDto } from './achados';
 
+export const AutorizacaoDeTeste = z.object({
+  responsavel: z.string().min(1),
+  referencia: z.string().min(1),
+  aceito: z.literal(true),
+});
+export type AutorizacaoDeTeste = z.infer<typeof AutorizacaoDeTeste>;
+
 export const CorpoDeSolicitacaoDeAvaliacao = z.object({
   sistemaId: z.uuid(),
   perfil: z.enum(PERFIS_DE_AVALIACAO).default('PASSIVO'),
   notaMinima: z.number().int().min(0).max(100).default(70),
+  autorizacao: AutorizacaoDeTeste.optional(),
+  permitirCriacaoDeDados: z.boolean().default(false),
 });
 export type CorpoDeSolicitacaoDeAvaliacao = z.infer<typeof CorpoDeSolicitacaoDeAvaliacao>;
 
@@ -48,6 +57,7 @@ export const AvaliacaoDto = z.object({
   iniciadaEm: DataIso.nullable(),
   concluidaEm: DataIso.nullable(),
   motivoDaFalha: z.string().nullable(),
+  autorizacao: z.object({ responsavel: z.string(), referencia: z.string() }).nullable(),
   relatorioId: z.uuid().nullable(),
   contagemDeAchados: z.record(z.enum(SEVERIDADES), z.number().int()),
 });

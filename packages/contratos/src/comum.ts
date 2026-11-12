@@ -18,7 +18,7 @@ export type MetodoDeVerificacao = (typeof METODOS_DE_VERIFICACAO)[number];
 export const ESTADOS_DA_VERIFICACAO = ['PENDENTE', 'VERIFICADO', 'FALHOU', 'EXPIRADO'] as const;
 export type EstadoDaVerificacao = (typeof ESTADOS_DA_VERIFICACAO)[number];
 
-export const PERFIS_DE_AVALIACAO = ['PASSIVO', 'PADRAO', 'COMPLETO'] as const;
+export const PERFIS_DE_AVALIACAO = ['PASSIVO', 'PADRAO', 'COMPLETO', 'IA'] as const;
 export type PerfilDeAvaliacao = (typeof PERFIS_DE_AVALIACAO)[number];
 
 export const ESTADOS_DA_AVALIACAO = [
@@ -84,6 +84,24 @@ export const TIPOS_DE_CONSTATACAO = [
   'VERSAO_EXPOSTA_SERVER',
   'VERSAO_EXPOSTA_X_POWERED_BY',
   'VERSAO_EXPOSTA_OUTROS',
+  'ARQUIVO_SENSIVEL_EXPOSTO',
+  'LISTAGEM_DE_DIRETORIO',
+  'CORS_PERMISSIVO',
+  'METODO_HTTP_PERIGOSO',
+  'REDIRECIONAMENTO_ABERTO',
+  'ENTRADA_REFLETIDA_SEM_ESCAPE',
+  'ERRO_DETALHADO_EXPOSTO',
+  'SECURITY_TXT_AUSENTE',
+  'PAGINA_SENSIVEL_SEM_AUTENTICACAO',
+  'CONTROLE_DE_ACESSO_QUEBRADO',
+  'INJECAO_SQL',
+  'INJECAO_DE_TEMPLATE',
+  'TRAVESSIA_DE_CAMINHO',
+  'IA_INJECAO_DE_PROMPT',
+  'IA_VAZAMENTO_DE_PROMPT_DE_SISTEMA',
+  'IA_VAZAMENTO_DE_DADOS_SENSIVEIS',
+  'IA_SAIDA_INSEGURA',
+  'IA_ACAO_EXCESSIVA',
 ] as const;
 export type TipoDeConstatacao = (typeof TIPOS_DE_CONSTATACAO)[number];
 
@@ -111,6 +129,10 @@ export const EscopoDaTarefa = z.object({
   dominiosBloqueados: z.array(z.string()),
   requisicoesPorSegundo: z.number().positive().max(50),
   tempoMaximoMs: z.number().int().positive(),
+  metodosPermitidos: z.array(z.string()).min(1),
+  caminhosExcluidos: z.array(z.string()),
+  tetoDeRequisicoes: z.number().int().positive(),
+  permitirCriacaoDeDados: z.boolean(),
 });
 export type EscopoDaTarefa = z.infer<typeof EscopoDaTarefa>;
 

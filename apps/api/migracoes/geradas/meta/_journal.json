@@ -8,6 +8,13 @@
       "when": 1794486139871,
       "tag": "0000_tired_maverick",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794498949931,
+      "tag": "0001_steep_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }

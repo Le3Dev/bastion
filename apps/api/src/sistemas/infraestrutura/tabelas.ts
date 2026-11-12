@@ -1,5 +1,22 @@
-import { index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { organizacoes } from '../../contas/infraestrutura/tabelas'
+
+type CredencialDeTesteSalva = {
+  modo: 'FORMULARIO' | 'JSON'
+  urlDeLogin: string
+  campoUsuario: string
+  campoSenha: string
+  indicadorDeSucesso: string
+  segredoUsuarioCifrado: string
+  segredoSenhaCifrado: string
+}
+type ConectorDeIaSalvo = {
+  url: string
+  modeloDoCorpo: string
+  caminhoDaResposta: string
+  frasesSigilosas: string[]
+  cabecalhosCifrados: string | null
+}
 
 type TipoDeSistema = 'SITE' | 'API' | 'SISTEMA_INTERNO' | 'APP_COM_IA'
 type MetodoDeVerificacao = 'DNS_TXT' | 'ARQUIVO_WELL_KNOWN' | 'CABECALHO_HTTP'
@@ -22,6 +39,9 @@ export const sistemas = pgTable(
     verificacaoExpiraEm: timestamp('verificacao_expira_em', { withTimezone: true }),
     verificacaoMensagem: text('verificacao_mensagem'),
     ultimaNota: integer('ultima_nota'),
+    credencialDeTeste: jsonb('credencial_de_teste').$type<CredencialDeTesteSalva>(),
+    conectorDeIa: jsonb('conector_de_ia').$type<ConectorDeIaSalvo>(),
+    permitirCriacaoDeDadosDeTeste: boolean('permitir_criacao_de_dados_de_teste').notNull().default(false),
     criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('sistemas_organizacao_idx').on(t.organizacaoId, t.criadoEm.desc())],

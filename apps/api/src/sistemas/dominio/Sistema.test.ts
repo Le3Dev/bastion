@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { ConectorDeIa } from './ConectorDeIa';
+import { CredencialDeTeste } from './CredencialDeTeste';
 import { Escopo } from './Escopo';
 import { Sistema, type DadosParaCadastrarSistema } from './Sistema';
 
@@ -117,6 +119,75 @@ describe('Sistema', () => {
     for (const invalida of [-1, 101, 50.5, Number.NaN]) {
       expect(codigoDe(() => sistema.atualizarUltimaNota(invalida))).toBe('NOTA_INVALIDA');
     }
+  });
+
+  it('guarda credencial de teste, conector de IA e consentimento, e reconstitui', () => {
+    const sistema = Sistema.cadastrar(base({ tipo: 'APP_COM_IA' }), AGORA);
+    sistema.definirCredencialDeTeste(
+      CredencialDeTeste.criar({
+        modo: 'FORMULARIO',
+        urlDeLogin: 'https://hml.exemplo-loja.net/login',
+        campoUsuario: 'email',
+        campoSenha: 'senha',
+        indicadorDeSucesso: '/painel',
+        segredoUsuarioCifrado: 'cifrado-u',
+        segredoSenhaCifrado: 'cifrado-s',
+      }),
+    );
+    sistema.definirConectorDeIa(
+      ConectorDeIa.criar({
+        url: 'https://hml.exemplo-loja.net/chat',
+        modeloDoCorpo: '{"mensagem":"{{mensagem}}"}',
+        caminhoDaResposta: 'resposta.texto',
+        frasesSigilosas: ['segredo'],
+        cabecalhosCifrados: null,
+      }),
+    );
+    sistema.definirConsentimentoDeCriacaoDeDados(true);
+    const copia = Sistema.reconstituir(sistema.paraDados());
+    expect(copia.paraDados()).toEqual(sistema.paraDados());
+    expect(copia.permitirCriacaoDeDadosDeTeste).toBe(true);
+    expect(JSON.stringify(copia.credencialDeTeste)).not.toContain('cifrado');
+    sistema.removerCredencialDeTeste();
+    sistema.removerConectorDeIa();
+    expect(sistema.credencialDeTeste).toBeNull();
+    expect(sistema.conectorDeIa).toBeNull();
+  });
+
+  it('rejeita conector sem o marcador {{mensagem}}', () => {
+    expect(
+      codigoDe(() =>
+        ConectorDeIa.criar({
+          url: 'https://x.net/chat',
+          modeloDoCorpo: '{}',
+          caminhoDaResposta: 'r',
+          frasesSigilosas: [],
+          cabecalhosCifrados: null,
+        }),
+      ),
+    ).toBe('CONECTOR_SEM_MARCADOR');
+  });
+
+  it('podeAvaliarComPerfil exige verificação e, para IA, tipo e conector', () => {
+    const site = Sistema.cadastrar(base(), AGORA);
+    expect(site.podeAvaliarComPerfil('PADRAO', AGORA).ok).toBe(false);
+    site.registrarResultadoDaVerificacao(true, '', AGORA);
+    expect(site.podeAvaliarComPerfil('PADRAO', AGORA).ok).toBe(true);
+    expect(site.podeAvaliarComPerfil('IA', AGORA).ok).toBe(false);
+
+    const app = Sistema.cadastrar(base({ tipo: 'APP_COM_IA' }), AGORA);
+    app.registrarResultadoDaVerificacao(true, '', AGORA);
+    expect(app.podeAvaliarComPerfil('IA', AGORA).motivo).toContain('conector');
+    app.definirConectorDeIa(
+      ConectorDeIa.criar({
+        url: 'https://x.net/chat',
+        modeloDoCorpo: '{{mensagem}}',
+        caminhoDaResposta: 'r',
+        frasesSigilosas: [],
+        cabecalhosCifrados: null,
+      }),
+    );
+    expect(app.podeAvaliarComPerfil('IA', AGORA).ok).toBe(true);
   });
 
   it('reconstitui a partir dos dados', () => {

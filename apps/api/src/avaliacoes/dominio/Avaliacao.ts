@@ -5,11 +5,13 @@ import {
   type Identificador,
 } from '@bastion/dominio-compartilhado';
 import { Agenda, type DadosDaAgenda } from './Agenda';
+import { AutorizacaoDeTeste, type DadosDaAutorizacaoDeTeste } from './AutorizacaoDeTeste';
 import { Etapa, type DadosDaEtapa, type EstadoDaEtapa } from './Etapa';
 import { podeTransicionar, type EstadoDaAvaliacao } from './EstadoDaAvaliacao';
 import {
   etapasDoPerfil,
   perfilDisponivelNoMvp,
+  perfilEhAtivo,
   tempoMaximoDeExecucaoMs,
   type PerfilDeAvaliacao,
 } from './PerfilDeAvaliacao';
@@ -42,6 +44,9 @@ export interface DadosDaAvaliacao {
   readonly motivoDaFalha: string | null;
   /** Achado que esta avaliação revalida (avaliação de revalidação); ausente nas demais. */
   readonly achadoRevalidadoId?: Identificador | null;
+  /** Autorização por escrito (perfis ativos); ausente em registros antigos. */
+  readonly autorizacao?: DadosDaAutorizacaoDeTeste | null;
+  readonly permitirCriacaoDeDados?: boolean;
 }
 
 export interface ParametrosDeSolicitacao {
@@ -55,6 +60,8 @@ export interface ParametrosDeSolicitacao {
   readonly solicitadaPor: string;
   readonly sistemaVerificado: boolean;
   readonly achadoRevalidadoId?: Identificador | null;
+  readonly autorizacao?: AutorizacaoDeTeste;
+  readonly permitirCriacaoDeDados?: boolean;
 }
 
 /** Agregado raiz: só ele muda o próprio estado. */
@@ -81,6 +88,8 @@ export class Avaliacao {
       | 'solicitadaEm'
       | 'achadoRevalidadoId'
     >,
+    private readonly _autorizacao: AutorizacaoDeTeste | null,
+    private readonly _permitirCriacaoDeDados: boolean,
     private readonly _agenda: Agenda,
     etapas: Etapa[],
     estado: EstadoDaAvaliacao,
@@ -112,6 +121,12 @@ export class Avaliacao {
     if (!Number.isInteger(parametros.notaMinima) || parametros.notaMinima < 0 || parametros.notaMinima > 100) {
       throw new ErroDeDominio('A nota mínima deve ser um inteiro entre 0 e 100', 'NOTA_MINIMA_INVALIDA');
     }
+    if (perfilEhAtivo(parametros.perfil) && parametros.autorizacao === undefined) {
+      throw new ErroDeDominio(
+        'Perfis ativos exigem autorização por escrito (responsável e referência do escopo).',
+        'AUTORIZACAO_OBRIGATORIA',
+      );
+    }
 
     const etapas = etapasDoPerfil(parametros.perfil).map((nome, indice) => Etapa.criar(indice + 1, nome));
     const avaliacao = new Avaliacao(
@@ -126,6 +141,8 @@ export class Avaliacao {
         solicitadaEm: agora,
         achadoRevalidadoId: parametros.achadoRevalidadoId ?? null,
       },
+      parametros.autorizacao ?? null,
+      parametros.permitirCriacaoDeDados ?? false,
       parametros.agenda,
       etapas,
       'RASCUNHO',
@@ -161,6 +178,10 @@ export class Avaliacao {
         solicitadaEm: dados.solicitadaEm,
         achadoRevalidadoId: dados.achadoRevalidadoId ?? null,
       },
+      dados.autorizacao === undefined || dados.autorizacao === null
+        ? null
+        : AutorizacaoDeTeste.reconstituir(dados.autorizacao),
+      dados.permitirCriacaoDeDados ?? false,
       Agenda.reconstituir(dados.agenda),
       dados.etapas.map((etapa) => Etapa.reconstituir(etapa)),
       dados.estado,
@@ -194,6 +215,14 @@ export class Avaliacao {
 
   get achadoRevalidadoId(): Identificador | null {
     return this.dados.achadoRevalidadoId ?? null;
+  }
+
+  get autorizacao(): AutorizacaoDeTeste | null {
+    return this._autorizacao;
+  }
+
+  get permitirCriacaoDeDados(): boolean {
+    return this._permitirCriacaoDeDados;
   }
 
   get estado(): EstadoDaAvaliacao {
@@ -313,6 +342,8 @@ export class Avaliacao {
       concluidaEm: this._concluidaEm,
       motivoDaFalha: this._motivoDaFalha,
       achadoRevalidadoId: this.achadoRevalidadoId,
+      autorizacao: this._autorizacao === null ? null : this._autorizacao.paraDados(),
+      permitirCriacaoDeDados: this._permitirCriacaoDeDados,
     };
   }
 

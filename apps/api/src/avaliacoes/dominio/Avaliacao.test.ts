@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ErroDeDominio } from '@bastion/dominio-compartilhado';
 import { Agenda } from './Agenda';
 import { Avaliacao } from './Avaliacao';
+import { AutorizacaoDeTeste } from './AutorizacaoDeTeste';
 import {
   ESTADOS_DA_AVALIACAO,
   TRANSICOES_DA_AVALIACAO,
@@ -114,9 +115,45 @@ describe('Avaliacao.solicitar', () => {
     expect(a.estado).toBe('NA_FILA');
   });
 
-  it('rejeita perfil indisponível no MVP', () => {
-    expect(codigoDoErro(() => criar(true, 'PADRAO'))).toBe('PERFIL_INDISPONIVEL');
-    expect(codigoDoErro(() => criar(true, 'COMPLETO'))).toBe('PERFIL_INDISPONIVEL');
+  it('perfil ativo sem autorização é rejeitado', () => {
+    expect(codigoDoErro(() => criar(true, 'PADRAO'))).toBe('AUTORIZACAO_OBRIGATORIA');
+    expect(codigoDoErro(() => criar(true, 'COMPLETO'))).toBe('AUTORIZACAO_OBRIGATORIA');
+    expect(codigoDoErro(() => criar(true, 'IA'))).toBe('AUTORIZACAO_OBRIGATORIA');
+  });
+
+  it('perfil ativo com autorização é aceito e guarda o consentimento', () => {
+    const a = Avaliacao.solicitar(
+      {
+        id: 'av-2',
+        organizacaoId: 'org-1',
+        sistemaId: 'sis-1',
+        perfil: 'COMPLETO',
+        agenda: Agenda.unica(),
+        notaMinima: 70,
+        origem: 'WEB',
+        solicitadaPor: 'ana@loja.com',
+        sistemaVerificado: true,
+        autorizacao: AutorizacaoDeTeste.criar({ responsavel: 'Ana', referencia: 'Contrato 42' }, T0),
+        permitirCriacaoDeDados: true,
+      },
+      T0,
+    );
+    expect(a.estado).toBe('NA_FILA');
+    expect(a.autorizacao?.responsavel).toBe('Ana');
+    expect(a.permitirCriacaoDeDados).toBe(true);
+    const dados = a.paraDados();
+    expect(dados.autorizacao?.referencia).toBe('Contrato 42');
+    expect(Avaliacao.reconstituir(dados).autorizacao?.referencia).toBe('Contrato 42');
+  });
+
+  it('passivo dispensa autorização', () => {
+    expect(criar(true, 'PASSIVO').autorizacao).toBeNull();
+  });
+
+  it('autorização exige responsável e referência', () => {
+    expect(codigoDoErro(() => AutorizacaoDeTeste.criar({ responsavel: ' ', referencia: 'x' }, T0))).toBe(
+      'AUTORIZACAO_INCOMPLETA',
+    );
   });
 
   it('rejeita agenda recorrente e nota mínima inválida', () => {
