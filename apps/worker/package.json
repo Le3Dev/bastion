@@ -8,7 +8,8 @@
     "start": "tsx --env-file-if-exists=../../.env src/principal.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integracao": "vitest run --config vitest.integracao.config.ts"
   },
   "dependencies": {
     "@bastion/contratos": "workspace:*",

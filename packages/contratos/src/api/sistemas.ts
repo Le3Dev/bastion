@@ -31,6 +31,41 @@ export const RespostaDeCadastroDeSistema = z.object({
 });
 export type RespostaDeCadastroDeSistema = z.infer<typeof RespostaDeCadastroDeSistema>;
 
+export const CredencialDeTesteDto = z.object({
+  configurada: z.boolean(),
+  modo: z.enum(['FORMULARIO', 'JSON']).nullable(),
+  urlDeLogin: z.string().nullable(),
+  indicadorDeSucesso: z.string().nullable(),
+});
+export type CredencialDeTesteDto = z.infer<typeof CredencialDeTesteDto>;
+
+export const CorpoDeCredencialDeTeste = z.object({
+  modo: z.enum(['FORMULARIO', 'JSON']),
+  urlDeLogin: z.url(),
+  campoUsuario: z.string().min(1),
+  campoSenha: z.string().min(1),
+  usuario: z.string().min(1),
+  senha: z.string().min(1),
+  indicadorDeSucesso: z.string().min(1),
+});
+export type CorpoDeCredencialDeTeste = z.infer<typeof CorpoDeCredencialDeTeste>;
+
+export const ConectorDeIaDto = z.object({
+  configurado: z.boolean(),
+  url: z.string().nullable(),
+  caminhoDaResposta: z.string().nullable(),
+});
+export type ConectorDeIaDto = z.infer<typeof ConectorDeIaDto>;
+
+export const CorpoDeConectorDeIa = z.object({
+  url: z.url(),
+  cabecalhos: z.record(z.string(), z.string()).optional(),
+  modeloDoCorpo: z.string().min(1),
+  caminhoDaResposta: z.string().min(1),
+  frasesSigilosas: z.array(z.string()).default([]),
+});
+export type CorpoDeConectorDeIa = z.infer<typeof CorpoDeConectorDeIa>;
+
 export const SistemaDto = z.object({
   id: z.uuid(),
   nome: z.string(),
@@ -45,6 +80,9 @@ export const SistemaDto = z.object({
     mensagem: z.string().nullable(),
   }),
   ultimaNota: z.number().nullable(),
+  credencialDeTeste: CredencialDeTesteDto,
+  conectorDeIa: ConectorDeIaDto,
+  permitirCriacaoDeDadosDeTeste: z.boolean(),
   criadoEm: DataIso,
 });
 export type SistemaDto = z.infer<typeof SistemaDto>;

@@ -22,6 +22,9 @@ export const ACOES = [
   'ACHADO_ESTADO_ALTERADO',
   'RISCO_ACEITO',
   'RELATORIO_GERADO',
+  'CREDENCIAL_DE_TESTE_ALTERADA',
+  'CONECTOR_DE_IA_ALTERADO',
+  'CONSENTIMENTO_DE_DADOS_ALTERADO',
 ] as const;
 
 export type Acao = (typeof ACOES)[number];

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { sair } from "@/prototipo/armazem";
-import { rotuloDoPapel } from "@/prototipo/rotulos";
-import { useArmazem } from "@/prototipo/useArmazem";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { useSessao } from "@/api/sessao";
+import { rotuloDoPapel } from "@/apresentacao/rotulos";
 import { Icone, type NomeDeIcone } from "./Icone";
 
 interface ItemDoMenu {
@@ -15,30 +15,24 @@ interface ItemDoMenu {
 }
 
 export const MenuLateral = () => {
-  const estado = useArmazem();
+  const { usuario, organizacao, papel, sair } = useSessao();
   const caminho = usePathname();
-  const roteador = useRouter();
-  const relatorioRecente = estado.relatorios[0];
+  const [saindo, setSaindo] = useState(false);
 
   const itens: ItemDoMenu[] = [
     { rotulo: "Painel", href: "/painel", prefixo: "/painel", icone: "painel" },
     { rotulo: "Sistemas", href: "/sistemas", prefixo: "/sistemas", icone: "sistemas" },
     { rotulo: "Avaliações", href: "/avaliacoes", prefixo: "/avaliacoes", icone: "avaliacoes" },
     { rotulo: "Achados", href: "/achados", prefixo: "/achados", icone: "achados" },
-    {
-      rotulo: "Relatórios",
-      href: relatorioRecente ? `/relatorios/${relatorioRecente.id}` : "/painel",
-      prefixo: "/relatorios",
-      icone: "relatorios",
-    },
+    { rotulo: "Relatórios", href: "/relatorios", prefixo: "/relatorios", icone: "relatorios" },
     { rotulo: "Integrações", href: "/integracoes", prefixo: "/integracoes", icone: "integracoes" },
     { rotulo: "Equipe e auditoria", href: "/equipe", prefixo: "/equipe", icone: "equipe" },
     { rotulo: "Plano e cobrança", href: "/plano", prefixo: "/plano", icone: "plano" },
   ];
 
   const aoSair = (): void => {
-    sair();
-    roteador.push("/login");
+    setSaindo(true);
+    void sair();
   };
 
   return (
@@ -62,13 +56,11 @@ export const MenuLateral = () => {
       </nav>
       <div className="menu-rodape pilha">
         <div>
-          <div className="texto-2">{estado.organizacao.nome}</div>
-          <div>{estado.usuarioAtual?.nome ?? "Sessão encerrada"}</div>
-          {estado.usuarioAtual ? (
-            <div className="texto-muted mono">{rotuloDoPapel(estado.usuarioAtual.papel)}</div>
-          ) : null}
+          <div className="texto-2">{organizacao.nome}</div>
+          <div>{usuario.nome}</div>
+          <div className="texto-muted mono">{rotuloDoPapel(papel)}</div>
         </div>
-        <button type="button" className="btn btn-outline btn-sm" onClick={aoSair}>
+        <button type="button" className="btn btn-outline btn-sm" onClick={aoSair} disabled={saindo}>
           <Icone nome="sair" tamanho={16} />
           Sair
         </button>

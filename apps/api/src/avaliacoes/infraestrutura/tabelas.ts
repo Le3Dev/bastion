@@ -1,8 +1,8 @@
-import { index, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { organizacoes } from '../../contas/infraestrutura/tabelas'
 import { sistemas } from '../../sistemas/infraestrutura/tabelas'
 
-type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO'
+type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA'
 type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI'
 type EstadoDaAvaliacao =
   | 'RASCUNHO'
@@ -35,6 +35,8 @@ export const avaliacoes = pgTable(
     concluidaEm: timestamp('concluida_em', { withTimezone: true }),
     motivoDaFalha: text('motivo_da_falha'),
     achadoRevalidadoId: uuid('achado_revalidado_id'),
+    autorizacao: jsonb('autorizacao').$type<{ responsavel: string; referencia: string; concedidaEm?: string }>(),
+    permitirCriacaoDeDados: boolean('permitir_criacao_de_dados').notNull().default(false),
   },
   (t) => [
     index('avaliacoes_organizacao_solicitada_idx').on(t.organizacaoId, t.solicitadaEm.desc()),

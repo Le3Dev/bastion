@@ -1,156 +1,142 @@
 "use client";
 
+import type { EstadoDoAchado } from "@bastion/contratos";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
+import { mudarEstadoDoAchado, obterAchado, revalidarAchado } from "@/api/achados";
+import { mensagemDoErro } from "@/api/cliente";
+import { listarMembros } from "@/api/contas";
+import { TEXTO_SEM_PERMISSAO, useSessao, type Permissao } from "@/api/sessao";
+import { useConsulta } from "@/api/useConsulta";
+import { formatarData, formatarDataHora } from "@/apresentacao/formatacao";
+import { rotuloDoEstadoDoAchado } from "@/apresentacao/rotulos";
 import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
 import { TagDeSeveridade } from "@/componentes/TagDeSeveridade";
-import {
-  achadoPorId,
-  concluirRevalidacao,
-  mudarEstadoDoAchado,
-  revalidarAchado,
-  sistemaPorId,
-} from "@/prototipo/armazem";
-import { mensagemDeErro } from "@/prototipo/erros";
-import { formatarData, formatarDataHora } from "@/prototipo/formatacao";
-import { transicoesPossiveisDoAchado } from "@/prototipo/maquinas-de-estado";
-import { rotuloDoEstadoDoAchado } from "@/prototipo/rotulos";
-import type { EstadoDoAchado, RiscoAceito } from "@/prototipo/tipos";
-import { useArmazem } from "@/prototipo/useArmazem";
-import { FormularioDeRiscoAceito } from "../_componentes/FormularioDeRiscoAceito";
+import { FormularioDeRiscoAceito, type RiscoAceitoInformado } from "../_componentes/FormularioDeRiscoAceito";
 
-const ATRASO_DA_REVALIDACAO_MS = 2500;
-const TEXTO_SOMENTE_LEITURA = "Seu papel é somente leitura";
+/** Ações exibidas a partir de `transicoesPossiveis`. CORRIGIDO e REVALIDANDO nunca são oferecidos diretamente. */
+const ACOES: Partial<Record<EstadoDoAchado, { rotulo: string; permissao: Permissao; perigosa?: boolean }>> = {
+  CONFIRMADO: { rotulo: "Confirmar", permissao: "triarAchado" },
+  EM_CORRECAO: { rotulo: "Iniciar correção", permissao: "corrigirAchado" },
+  REABERTO: { rotulo: "Reabrir", permissao: "triarAchado", perigosa: true },
+  RISCO_ACEITO: { rotulo: "Aceitar o risco", permissao: "aceitarRisco" },
+};
 
-const rotuloDaAcao = (de: EstadoDoAchado, para: EstadoDoAchado): string => {
-  switch (para) {
-    case "CONFIRMADO":
-      return de === "NOVO" ? "Confirmar achado" : "Retomar como confirmado";
-    case "EM_CORRECAO":
-      return "Iniciar correção";
-    case "REVALIDANDO":
-      return "Solicitar revalidação";
-    case "REABERTO":
-      return "Reabrir";
-    case "RISCO_ACEITO":
-      return "Aceitar o risco";
-    case "CORRIGIDO":
-      return "Simular conclusão da revalidação";
-    default:
-      return rotuloDoEstadoDoAchado(para);
+const FormularioComMembros = ({
+  enviando,
+  aoConfirmar,
+  aoCancelar,
+}: {
+  enviando: boolean;
+  aoConfirmar: (risco: RiscoAceitoInformado) => void;
+  aoCancelar: () => void;
+}) => {
+  const { dados, erro, carregando } = useConsulta(listarMembros);
+  if (erro) {
+    return (
+      <div className="pilha">
+        <Alerta tipo="error">{erro}</Alerta>
+        <button type="button" className="btn btn-outline" onClick={aoCancelar}>
+          Cancelar
+        </button>
+      </div>
+    );
   }
+  if (carregando && dados === null) return <p className="texto-2">Carregando responsáveis...</p>;
+  return <FormularioDeRiscoAceito membros={dados ?? []} enviando={enviando} aoConfirmar={aoConfirmar} aoCancelar={aoCancelar} />;
 };
 
 const PaginaDoAchado = () => {
   const { id } = useParams<{ id: string }>();
-  const estado = useArmazem();
+  const roteador = useRouter();
+  const { pode } = useSessao();
+  const { dados: achado, erro: erroDaConsulta, carregando, recarregar } = useConsulta((sinal) => obterAchado(id, sinal), id);
   const [comentario, setComentario] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [formularioAberto, setFormularioAberto] = useState(false);
-  const [revalidando, setRevalidando] = useState(false);
-  const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (temporizador.current !== null) clearTimeout(temporizador.current);
-    },
-    [],
-  );
-
-  const achado = achadoPorId(estado, id);
+  const [ocupado, setOcupado] = useState(false);
 
   if (!achado) {
     return (
-      <div className="page">
-        <EstadoVazio
-          titulo="Achado não encontrado"
-          descricao="O achado pode ter sido removido ou o endereço está incorreto."
-          acao={
-            <Link href="/achados" className="btn btn-outline">
-              Voltar para achados
-            </Link>
-          }
-        />
+      <div className="page pilha">
+        {erroDaConsulta ? <Alerta tipo="error">{erroDaConsulta}</Alerta> : null}
+        {carregando ? (
+          <p className="texto-2" role="status">
+            Carregando achado...
+          </p>
+        ) : (
+          <EstadoVazio
+            titulo="Achado não encontrado"
+            descricao="O achado pode ter sido removido ou o endereço está incorreto."
+            acao={
+              <Link href="/achados" className="btn btn-outline">
+                Voltar para achados
+              </Link>
+            }
+          />
+        )}
       </div>
     );
   }
 
-  const somenteLeitura = estado.usuarioAtual?.papel === "LEITOR";
-  const sistema = sistemaPorId(estado, achado.sistemaId);
-  const transicoes = transicoesPossiveisDoAchado(achado.estado);
-  const comentarioOpcional = comentario.trim() === "" ? undefined : comentario;
+  const comentarioOpcional = comentario.trim() === "" ? undefined : comentario.trim();
+  const acoesDoEstado = achado.transicoesPossiveis.filter((para) => ACOES[para] !== undefined);
+  const podeRevalidar = achado.estado === "EM_CORRECAO";
+  const semAcoes = acoesDoEstado.length === 0 && !podeRevalidar;
 
-  const executar = (acao: () => void, mensagemDeSucesso: string) => {
+  const mudarEstado = async (
+    para: EstadoDoAchado,
+    riscoAceito?: RiscoAceitoInformado,
+  ): Promise<void> => {
     setErro(null);
     setAviso(null);
+    setOcupado(true);
     try {
-      acao();
+      await mudarEstadoDoAchado(achado.id, { estado: para, comentario: comentarioOpcional, riscoAceito });
       setComentario("");
-      setAviso(mensagemDeSucesso);
+      setFormularioAberto(false);
+      setAviso(`Estado alterado para "${rotuloDoEstadoDoAchado(para)}".`);
+      recarregar();
     } catch (e) {
-      setErro(mensagemDeErro(e));
+      setErro(mensagemDoErro(e));
+    } finally {
+      setOcupado(false);
     }
   };
 
-  const aoMudarEstado = (para: EstadoDoAchado) => {
+  const aoClicarNaAcao = (para: EstadoDoAchado): void => {
     if (para === "RISCO_ACEITO") {
       setErro(null);
       setAviso(null);
       setFormularioAberto(true);
       return;
     }
-    if (para === "CORRIGIDO") {
-      executar(() => {
-        concluirRevalidacao(achado.id);
-      }, "Revalidação concluída: o achado foi marcado como corrigido.");
-      return;
-    }
-    if (para === "REVALIDANDO") {
-      setErro(null);
-      setAviso(null);
-      try {
-        revalidarAchado(achado.id);
-      } catch (e) {
-        setErro(mensagemDeErro(e));
-        return;
-      }
-      setRevalidando(true);
-      temporizador.current = setTimeout(() => {
-        temporizador.current = null;
-        setRevalidando(false);
-        try {
-          concluirRevalidacao(achado.id);
-          setAviso("Revalidação concluída: o achado foi marcado como corrigido.");
-        } catch (e) {
-          setErro(mensagemDeErro(e));
-        }
-      }, ATRASO_DA_REVALIDACAO_MS);
-      return;
-    }
-    executar(() => {
-      mudarEstadoDoAchado(achado.id, para, { comentario: comentarioOpcional });
-    }, `Estado alterado para "${rotuloDoEstadoDoAchado(para)}".`);
+    void mudarEstado(para);
   };
 
-  const aoAceitarRisco = (riscoAceito: RiscoAceito) => {
-    executar(() => {
-      mudarEstadoDoAchado(achado.id, "RISCO_ACEITO", { comentario: comentarioOpcional, riscoAceito });
-      setFormularioAberto(false);
-    }, "Risco aceito registrado.");
+  const solicitarRevalidacao = async (): Promise<void> => {
+    setErro(null);
+    setAviso(null);
+    setOcupado(true);
+    try {
+      const resposta = await revalidarAchado(achado.id);
+      roteador.push(`/avaliacoes/${resposta.avaliacaoId}`);
+    } catch (e) {
+      setErro(mensagemDoErro(e));
+      setOcupado(false);
+    }
   };
-
-  const emAndamento = revalidando && achado.estado === "REVALIDANDO";
 
   return (
     <div className="page pilha">
       <CabecalhoDaPagina
         titulo={achado.titulo}
-        descricao={sistema?.nome}
+        descricao={achado.sistemaNome}
         acoes={
           <div className="linha">
             <TagDeSeveridade severidade={achado.severidade} />
@@ -160,12 +146,13 @@ const PaginaDoAchado = () => {
       />
 
       {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
+      {erroDaConsulta ? <Alerta tipo="error">{erroDaConsulta}</Alerta> : null}
       {aviso ? <Alerta tipo="success">{aviso}</Alerta> : null}
 
       <div className="card">
         <dl className="lista-definicao">
           <dt>Sistema</dt>
-          <dd>{sistema?.nome ?? achado.sistemaId}</dd>
+          <dd>{achado.sistemaNome}</dd>
           <dt>Tipo</dt>
           <dd>{achado.tipo}</dd>
           <dt>Local</dt>
@@ -180,9 +167,9 @@ const PaginaDoAchado = () => {
           <dd>{formatarDataHora(achado.ultimaVezEm)}</dd>
           <dt>Avaliações</dt>
           <dd className="linha">
-            {achado.avaliacaoIds.map((avaliacaoId) => (
-              <Link key={avaliacaoId} href={`/avaliacoes/${avaliacaoId}`} className="mono">
-                {avaliacaoId}
+            {achado.avaliacaoIds.map((avaliacaoId, indice) => (
+              <Link key={avaliacaoId} href={`/avaliacoes/${avaliacaoId}`}>
+                Avaliação {indice + 1}
               </Link>
             ))}
           </dd>
@@ -253,9 +240,15 @@ const PaginaDoAchado = () => {
 
       <div className="card pilha">
         <h2 className="card-titulo">Ações</h2>
-        {transicoes.length === 0 ? (
+        {semAcoes ? (
           <p className="texto-2">Nenhuma ação disponível neste estado.</p>
-        ) : formularioAberto ? null : (
+        ) : formularioAberto ? (
+          <FormularioComMembros
+            enviando={ocupado}
+            aoConfirmar={(risco) => void mudarEstado("RISCO_ACEITO", risco)}
+            aoCancelar={() => setFormularioAberto(false)}
+          />
+        ) : (
           <>
             <div className="field">
               <label className="label" htmlFor="achado-comentario">
@@ -266,33 +259,44 @@ const PaginaDoAchado = () => {
                 className="input"
                 value={comentario}
                 onChange={(e) => setComentario(e.target.value)}
-                disabled={somenteLeitura || emAndamento}
+                disabled={ocupado}
               />
             </div>
-            {emAndamento ? <Alerta tipo="info">Revalidando o achado no sistema... aguarde alguns segundos.</Alerta> : null}
             <div className="linha">
-              {transicoes.map((para) => (
+              {acoesDoEstado.map((para) => {
+                const acao = ACOES[para];
+                if (!acao) return null;
+                const permitido = pode(acao.permissao);
+                return (
+                  <button
+                    key={para}
+                    type="button"
+                    className={acao.perigosa ? "btn btn-danger" : "btn btn-cta"}
+                    disabled={!permitido || ocupado}
+                    title={permitido ? undefined : TEXTO_SEM_PERMISSAO}
+                    onClick={() => aoClicarNaAcao(para)}
+                  >
+                    {acao.rotulo}
+                  </button>
+                );
+              })}
+              {podeRevalidar ? (
                 <button
-                  key={para}
                   type="button"
-                  className={para === "REABERTO" ? "btn btn-danger" : "btn btn-cta"}
-                  disabled={somenteLeitura || emAndamento}
-                  onClick={() => aoMudarEstado(para)}
+                  className="btn btn-outline"
+                  disabled={!pode("corrigirAchado") || ocupado}
+                  title={pode("corrigirAchado") ? undefined : TEXTO_SEM_PERMISSAO}
+                  onClick={() => void solicitarRevalidacao()}
                 >
-                  {rotuloDaAcao(achado.estado, para)}
+                  Solicitar revalidação
                 </button>
-              ))}
+              ) : null}
             </div>
-            {somenteLeitura ? <span className="hint">{TEXTO_SOMENTE_LEITURA}</span> : null}
+            {!pode("triarAchado") && !pode("corrigirAchado") ? (
+              <span className="hint">Seu papel é somente leitura</span>
+            ) : null}
           </>
         )}
-        {formularioAberto ? (
-          <FormularioDeRiscoAceito
-            membros={estado.membros}
-            aoConfirmar={aoAceitarRisco}
-            aoCancelar={() => setFormularioAberto(false)}
-          />
-        ) : null}
       </div>
 
       <div className="card">

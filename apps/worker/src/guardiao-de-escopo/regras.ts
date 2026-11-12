@@ -6,7 +6,12 @@ export interface Decisao {
   motivo: string;
 }
 
-export type EscopoDeRegras = Pick<EscopoDaTarefa, 'hostsPermitidos' | 'dominiosBloqueados'>;
+export type EscopoDeRegras = Pick<EscopoDaTarefa, 'hostsPermitidos' | 'dominiosBloqueados'> & {
+  /** Métodos HTTP que o escopo autoriza (ex.: GET e HEAD no perfil passivo). */
+  metodosPermitidos: string[];
+  /** Prefixos de caminho que jamais devem ser tocados. */
+  caminhosExcluidos?: string[];
+};
 
 export interface PedidoDeRequisicao {
   url: string;
@@ -14,8 +19,6 @@ export interface PedidoDeRequisicao {
   perfil: PerfilDeAvaliacao;
   escopo: EscopoDeRegras;
 }
-
-const METODOS_DO_PERFIL_PASSIVO = ['GET', 'HEAD'];
 
 const negar = (motivo: string): Decisao => ({ permitida: false, motivo });
 
@@ -38,11 +41,17 @@ export function avaliarRequisicao(pedido: PedidoDeRequisicao): Decisao {
     return negar('Protocolo não permitido: somente http e https');
   }
 
-  if (
-    pedido.perfil === 'PASSIVO' &&
-    !METODOS_DO_PERFIL_PASSIVO.includes(pedido.metodo.toUpperCase())
-  ) {
-    return negar('Método não permitido no perfil passivo');
+  const metodo = pedido.metodo.toUpperCase();
+  if (!pedido.escopo.metodosPermitidos.some((permitido) => permitido.toUpperCase() === metodo)) {
+    return negar(`Método ${metodo} não permitido no escopo do perfil ${pedido.perfil.toLowerCase()}`);
+  }
+
+  const caminho = url.pathname;
+  const excluido = (pedido.escopo.caminhosExcluidos ?? []).find(
+    (prefixo) => prefixo !== '' && caminho.startsWith(prefixo),
+  );
+  if (excluido !== undefined) {
+    return negar(`Caminho excluído do escopo (${excluido})`);
   }
 
   if (!pedido.escopo.hostsPermitidos.some((permitido) => normalizarHost(permitido) === host)) {

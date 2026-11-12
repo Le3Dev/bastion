@@ -1,46 +1,52 @@
 "use client";
 
+import { EVENTOS_DE_WEBHOOK, type EventoDeWebhook } from "@bastion/contratos";
 import { useState, type FormEvent } from "react";
+import { mensagemDoErro } from "@/api/cliente";
+import { alterarWebhook, cadastrarWebhook, listarWebhooks, removerWebhook } from "@/api/contas";
+import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
+import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { EstadoVazio } from "@/componentes/EstadoVazio";
-import { alternarWebhook, cadastrarWebhook, removerWebhook } from "@/prototipo/armazem";
-import { mensagemDeErro } from "@/prototipo/erros";
-import { formatarDataHora } from "@/prototipo/formatacao";
-import type { EventoDeWebhook, WebhookDeSaida } from "@/prototipo/tipos";
+import { Icone } from "@/componentes/Icone";
+import { formatarDataHora } from "@/apresentacao/formatacao";
 import { BotaoDeConfirmacao } from "./BotaoDeConfirmacao";
 import { exemploDeEntregaDoWebhook, exemploDeVerificacaoEmNode } from "./exemplos";
 
-interface PropsDaSecao {
-  webhooks: WebhookDeSaida[];
-  somenteLeitura: boolean;
-}
-
-const EVENTOS: EventoDeWebhook[] = ["avaliacao.concluida", "avaliacao.falhou", "achado.criado", "achado.corrigido"];
-const TEXTO_SOMENTE_LEITURA = "Seu papel é somente leitura";
-
-export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
+export const SecaoWebhooks = () => {
+  const { pode } = useSessao();
+  const podeGerenciar = pode("webhooks");
+  const { dados, erro: erroDaLista, carregando, recarregar } = useConsulta(listarWebhooks);
   const [url, setUrl] = useState("");
   const [eventos, setEventos] = useState<EventoDeWebhook[]>([]);
   const [erroDaUrl, setErroDaUrl] = useState<string | null>(null);
   const [erroDosEventos, setErroDosEventos] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [segredo, setSegredo] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
 
-  const alternarEvento = (evento: EventoDeWebhook) => {
+  const alternarEvento = (evento: EventoDeWebhook): void => {
     setEventos((atual) => (atual.includes(evento) ? atual.filter((e) => e !== evento) : [...atual, evento]));
   };
 
-  const executar = (acao: () => void) => {
+  const executar = async (acao: () => Promise<unknown>): Promise<void> => {
     setErro(null);
+    setOcupado(true);
     try {
-      acao();
+      await acao();
+      recarregar();
     } catch (e) {
-      setErro(mensagemDeErro(e));
+      setErro(mensagemDoErro(e));
+    } finally {
+      setOcupado(false);
     }
   };
 
-  const aoCadastrar = (evento: FormEvent<HTMLFormElement>) => {
+  const aoCadastrar = async (evento: FormEvent<HTMLFormElement>): Promise<void> => {
     evento.preventDefault();
     setErro(null);
+    setCopiado(false);
     let valido = true;
     if (!url.trim().toLowerCase().startsWith("https://")) {
       setErroDaUrl("Informe uma URL que comece com https://.");
@@ -55,21 +61,52 @@ export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
       setErroDosEventos(null);
     }
     if (!valido) return;
-    try {
-      cadastrarWebhook(url, eventos);
+    await executar(async () => {
+      const resposta = await cadastrarWebhook({ url: url.trim(), eventos });
+      setSegredo(resposta.segredoDeAssinatura);
       setUrl("");
       setEventos([]);
-    } catch (e) {
-      setErro(mensagemDeErro(e));
+    });
+  };
+
+  const aoCopiar = async (): Promise<void> => {
+    if (segredo === null) return;
+    try {
+      await navigator.clipboard.writeText(segredo);
+      setCopiado(true);
+    } catch {
+      setErro("Não foi possível copiar automaticamente. Selecione o texto e copie manualmente.");
     }
   };
+
+  const webhooks = dados ?? [];
 
   return (
     <div className="card pilha">
       <h2 className="card-titulo">Webhooks de saída</h2>
       {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
+      {erroDaLista ? <Alerta tipo="error">{erroDaLista}</Alerta> : null}
+      {segredo ? (
+        <Alerta tipo="warning">
+          <div className="pilha">
+            <span>Segredo de assinatura: copie agora; ele não será mostrado de novo.</span>
+            <pre className="bloco-codigo">{segredo}</pre>
+            <div className="linha">
+              <button type="button" className="btn btn-sm" onClick={() => void aoCopiar()}>
+                <Icone nome="copiar" tamanho={14} />
+                {copiado ? "Copiado" : "Copiar"}
+              </button>
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => setSegredo(null)}>
+                Já copiei, fechar
+              </button>
+            </div>
+          </div>
+        </Alerta>
+      ) : null}
 
-      {webhooks.length === 0 ? (
+      {carregando && dados === null ? (
+        <p className="texto-2">Carregando webhooks...</p>
+      ) : webhooks.length === 0 ? (
         <EstadoVazio titulo="Nenhum webhook cadastrado" descricao="Cadastre uma URL para receber eventos da plataforma." />
       ) : (
         <table className="table">
@@ -104,18 +141,18 @@ export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
-                      disabled={somenteLeitura}
-                      title={somenteLeitura ? TEXTO_SOMENTE_LEITURA : undefined}
-                      onClick={() => executar(() => alternarWebhook(w.id))}
+                      disabled={!podeGerenciar || ocupado}
+                      title={podeGerenciar ? undefined : TEXTO_SEM_PERMISSAO}
+                      onClick={() => void executar(() => alterarWebhook(w.id, { ativo: !w.ativo }))}
                     >
                       {w.ativo ? "Desativar" : "Ativar"}
                     </button>
                     <BotaoDeConfirmacao
                       rotulo="Remover"
                       rotuloDeConfirmacao="Confirmar remoção"
-                      aoConfirmar={() => executar(() => removerWebhook(w.id))}
-                      desabilitado={somenteLeitura}
-                      titulo={somenteLeitura ? TEXTO_SOMENTE_LEITURA : undefined}
+                      aoConfirmar={() => void executar(() => removerWebhook(w.id))}
+                      desabilitado={!podeGerenciar || ocupado}
+                      titulo={podeGerenciar ? undefined : TEXTO_SEM_PERMISSAO}
                     />
                   </div>
                 </td>
@@ -125,7 +162,7 @@ export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
         </table>
       )}
 
-      <form onSubmit={aoCadastrar} noValidate>
+      <form onSubmit={(e) => void aoCadastrar(e)} noValidate>
         <h3>Novo webhook</h3>
         <div className="field">
           <label className="label" htmlFor="webhook-url">
@@ -137,7 +174,7 @@ export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://seu-servico.exemplo.com.br/bastion"
-            disabled={somenteLeitura}
+            disabled={!podeGerenciar}
             aria-invalid={erroDaUrl !== null}
           />
           {erroDaUrl ? <span className="erro-campo">{erroDaUrl}</span> : null}
@@ -145,22 +182,22 @@ export const SecaoWebhooks = ({ webhooks, somenteLeitura }: PropsDaSecao) => {
         <div className="field">
           <span className="label">Eventos</span>
           <div className="linha">
-            {EVENTOS.map((e) => (
+            {EVENTOS_DE_WEBHOOK.map((e) => (
               <label key={e} className="linha">
                 <input
                   type="checkbox"
                   checked={eventos.includes(e)}
                   onChange={() => alternarEvento(e)}
-                  disabled={somenteLeitura}
+                  disabled={!podeGerenciar}
                 />
                 <span className="mono">{e}</span>
               </label>
             ))}
           </div>
           {erroDosEventos ? <span className="erro-campo">{erroDosEventos}</span> : null}
-          {somenteLeitura ? <span className="hint">{TEXTO_SOMENTE_LEITURA}</span> : null}
+          {!podeGerenciar ? <span className="hint">{TEXTO_SEM_PERMISSAO}</span> : null}
         </div>
-        <button type="submit" className="btn btn-cta" disabled={somenteLeitura}>
+        <button type="submit" className="btn btn-cta" disabled={!podeGerenciar || ocupado}>
           Cadastrar webhook
         </button>
       </form>

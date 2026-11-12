@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState, type FormEvent } from "react";
+import { mensagemDoErro } from "@/api/cliente";
+import { entrar } from "@/api/contas";
 import { Alerta } from "@/componentes/Alerta";
-import { entrar } from "@/prototipo/armazem";
-import { mensagemDeErro } from "@/prototipo/erros";
 
 const PaginaDeLogin = () => {
   const roteador = useRouter();
@@ -13,19 +14,22 @@ const PaginaDeLogin = () => {
   const [erroDeEmail, definirErroDeEmail] = useState<string | null>(null);
   const [erroDeSenha, definirErroDeSenha] = useState<string | null>(null);
   const [erroGeral, definirErroGeral] = useState<string | null>(null);
+  const [enviando, definirEnviando] = useState(false);
 
-  const aoEnviar = (evento: FormEvent<HTMLFormElement>): void => {
+  const aoEnviar = async (evento: FormEvent<HTMLFormElement>): Promise<void> => {
     evento.preventDefault();
     definirErroGeral(null);
     const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     definirErroDeEmail(emailValido ? null : "Informe um e-mail válido.");
-    definirErroDeSenha(senha.trim().length > 0 ? null : "Informe a senha.");
-    if (!emailValido || senha.trim().length === 0) return;
+    definirErroDeSenha(senha.length > 0 ? null : "Informe a senha.");
+    if (!emailValido || senha.length === 0) return;
+    definirEnviando(true);
     try {
-      entrar(email, senha);
+      await entrar({ email: email.trim(), senha });
       roteador.push("/painel");
     } catch (erro) {
-      definirErroGeral(mensagemDeErro(erro));
+      definirErroGeral(mensagemDoErro(erro));
+      definirEnviando(false);
     }
   };
 
@@ -36,10 +40,7 @@ const PaginaDeLogin = () => {
           <div className="login-marca">BASTION</div>
           <p className="texto-2">Avaliação de segurança contínua e autorizada.</p>
         </div>
-        <Alerta tipo="info">
-          Protótipo navegável: use qualquer e-mail e senha; os dados são fictícios e ficam só na memória do navegador.
-        </Alerta>
-        <form onSubmit={aoEnviar} noValidate>
+        <form onSubmit={(e) => void aoEnviar(e)} noValidate>
           <div className="field">
             <label className="label" htmlFor="email">
               E-mail
@@ -71,10 +72,18 @@ const PaginaDeLogin = () => {
             {erroDeSenha ? <span className="erro-campo">{erroDeSenha}</span> : null}
           </div>
           {erroGeral ? <Alerta tipo="error">{erroGeral}</Alerta> : null}
-          <button type="submit" className="btn btn-cta" style={{ width: "100%", marginTop: "var(--esp-3)" }}>
-            Entrar
+          <button
+            type="submit"
+            className="btn btn-cta"
+            disabled={enviando}
+            style={{ width: "100%", marginTop: "var(--esp-3)" }}
+          >
+            {enviando ? "Entrando..." : "Entrar"}
           </button>
         </form>
+        <p className="texto-2">
+          Ainda não tem conta? <Link href="/cadastro">Criar organização</Link>
+        </p>
       </div>
     </main>
   );

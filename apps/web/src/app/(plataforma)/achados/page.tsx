@@ -1,72 +1,80 @@
 "use client";
 
+import type { EstadoDoAchado, Severidade } from "@bastion/contratos";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
-import { EstadoVazio } from "@/componentes/EstadoVazio";
-import { SeloDeEstado } from "@/componentes/SeloDeEstado";
-import { TagDeSeveridade } from "@/componentes/TagDeSeveridade";
-import { achadosEmAberto, contagemPorSeveridade, sistemaPorId } from "@/prototipo/armazem";
-import { formatarDataHora } from "@/prototipo/formatacao";
+import { useState, type FormEvent } from "react";
+import { listarAchados } from "@/api/achados";
+import { obterPainel } from "@/api/painel";
+import { listarSistemas } from "@/api/sistemas";
+import { useConsulta } from "@/api/useConsulta";
+import { usePaginacao } from "@/api/usePaginacao";
+import { formatarDataHora } from "@/apresentacao/formatacao";
 import {
   classeDaSeveridade,
   estadosDoAchadoDisponiveis,
   ordemDasSeveridades,
   rotuloDaSeveridade,
   rotuloDoEstadoDoAchado,
-} from "@/prototipo/rotulos";
-import type { EstadoDoAchado, Severidade } from "@/prototipo/tipos";
-import { useArmazem } from "@/prototipo/useArmazem";
+} from "@/apresentacao/rotulos";
+import { Alerta } from "@/componentes/Alerta";
+import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
+import { EstadoVazio } from "@/componentes/EstadoVazio";
+import { SeloDeEstado } from "@/componentes/SeloDeEstado";
+import { TagDeSeveridade } from "@/componentes/TagDeSeveridade";
 import estilos from "./_componentes/filtros.module.css";
+
+const LIMITE = 20;
 
 const TEXTO_DA_DEDUPLICACAO =
   "Quantas avaliações encontraram este mesmo problema. Achados repetidos são agrupados pela impressão digital (sistema, tipo e local), então não aparecem duplicados.";
 
 const PaginaDeAchados = () => {
-  const estado = useArmazem();
   const [severidades, setSeveridades] = useState<Severidade[]>([]);
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoDoAchado | "">("");
   const [sistemaFiltro, setSistemaFiltro] = useState("");
+  const [buscaDigitada, setBuscaDigitada] = useState("");
   const [busca, setBusca] = useState("");
-  const [mostrarEncerrados, setMostrarEncerrados] = useState(false);
+  const [incluirFechados, setIncluirFechados] = useState(false);
 
-  const contagem = useMemo(() => contagemPorSeveridade(achadosEmAberto(estado)), [estado]);
-  const totalEmAberto = useMemo(() => achadosEmAberto(estado).length, [estado]);
+  const sistemas = useConsulta(listarSistemas);
+  const painel = useConsulta(obterPainel);
 
-  const filtrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase();
-    const incluirEncerrados =
-      mostrarEncerrados || estadoFiltro === "CORRIGIDO" || estadoFiltro === "RISCO_ACEITO";
-    return estado.achados
-      .filter((a) => {
-        if (!incluirEncerrados && (a.estado === "CORRIGIDO" || a.estado === "RISCO_ACEITO")) return false;
-        if (severidades.length > 0 && !severidades.includes(a.severidade)) return false;
-        if (estadoFiltro !== "" && a.estado !== estadoFiltro) return false;
-        if (sistemaFiltro !== "" && a.sistemaId !== sistemaFiltro) return false;
-        if (termo !== "" && !`${a.titulo} ${a.local} ${a.tipo}`.toLowerCase().includes(termo)) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const porSeveridade = ordemDasSeveridades.indexOf(a.severidade) - ordemDasSeveridades.indexOf(b.severidade);
-        if (porSeveridade !== 0) return porSeveridade;
-        return b.ultimaVezEm.localeCompare(a.ultimaVezEm);
-      });
-  }, [estado.achados, severidades, estadoFiltro, sistemaFiltro, busca, mostrarEncerrados]);
+  const lista = usePaginacao(
+    (pagina, sinal) =>
+      listarAchados(
+        {
+          severidades,
+          estado: estadoFiltro === "" ? undefined : estadoFiltro,
+          sistemaId: sistemaFiltro === "" ? undefined : sistemaFiltro,
+          busca,
+          incluirFechados,
+          pagina,
+          limite: LIMITE,
+        },
+        sinal,
+      ),
+    [severidades.join(","), estadoFiltro, sistemaFiltro, busca, incluirFechados].join("|"),
+  );
 
-  const alternarSeveridade = (sev: Severidade) => {
+  const contagem = painel.dados?.achadosEmAbertoPorSeveridade;
+  const totalEmAberto = contagem ? ordemDasSeveridades.reduce((soma, sev) => soma + (contagem[sev] ?? 0), 0) : null;
+
+  const alternarSeveridade = (sev: Severidade): void => {
     setSeveridades((atual) => (atual.includes(sev) ? atual.filter((s) => s !== sev) : [...atual, sev]));
   };
 
-  const aoMudarEstado = (valor: string) => {
-    setEstadoFiltro(estadosDoAchadoDisponiveis.find((e) => e === valor) ?? "");
-  };
-
-  const limparFiltros = () => {
+  const limparFiltros = (): void => {
     setSeveridades([]);
     setEstadoFiltro("");
     setSistemaFiltro("");
+    setBuscaDigitada("");
     setBusca("");
-    setMostrarEncerrados(false);
+    setIncluirFechados(false);
+  };
+
+  const buscar = (evento: FormEvent<HTMLFormElement>): void => {
+    evento.preventDefault();
+    setBusca(buscaDigitada.trim());
   };
 
   return (
@@ -77,13 +85,15 @@ const PaginaDeAchados = () => {
         {ordemDasSeveridades.map((sev) => (
           <div key={sev} className="card kpi">
             <span className="kpi-rotulo">Em aberto: {rotuloDaSeveridade(sev)}</span>
-            <span className="kpi-valor">{contagem[sev]}</span>
+            <span className="kpi-valor">{contagem ? (contagem[sev] ?? 0) : "--"}</span>
           </div>
         ))}
       </div>
-      <p className="texto-2">
-        {totalEmAberto} {totalEmAberto === 1 ? "achado em aberto" : "achados em aberto"} no total.
-      </p>
+      {totalEmAberto !== null ? (
+        <p className="texto-2">
+          {totalEmAberto} {totalEmAberto === 1 ? "achado em aberto" : "achados em aberto"} no total.
+        </p>
+      ) : null}
 
       <div className="card">
         <h2 className="card-titulo">Filtros</h2>
@@ -115,7 +125,7 @@ const PaginaDeAchados = () => {
               id="filtro-estado"
               className="input"
               value={estadoFiltro}
-              onChange={(e) => aoMudarEstado(e.target.value)}
+              onChange={(e) => setEstadoFiltro(estadosDoAchadoDisponiveis.find((s) => s === e.target.value) ?? "")}
             >
               <option value="">Todos</option>
               {estadosDoAchadoDisponiveis.map((e) => (
@@ -136,34 +146,35 @@ const PaginaDeAchados = () => {
               onChange={(e) => setSistemaFiltro(e.target.value)}
             >
               <option value="">Todos</option>
-              {estado.sistemas.map((s) => (
+              {(sistemas.dados ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nome}
                 </option>
               ))}
             </select>
           </div>
-          <div className={estilos.campo}>
+          <form className={estilos.campo} onSubmit={buscar} role="search">
             <label className="label" htmlFor="filtro-busca">
               Busca
             </label>
-            <input
-              id="filtro-busca"
-              type="search"
-              className="input"
-              placeholder="Título, local ou tipo"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
+            <div className="linha">
+              <input
+                id="filtro-busca"
+                type="search"
+                className="input"
+                placeholder="Título, local ou tipo"
+                value={buscaDigitada}
+                onChange={(e) => setBuscaDigitada(e.target.value)}
+              />
+              <button type="submit" className="btn btn-outline btn-sm">
+                Buscar
+              </button>
+            </div>
+          </form>
         </div>
         <div className="linha" style={{ marginTop: "var(--esp-4)" }}>
           <label className="linha">
-            <input
-              type="checkbox"
-              checked={mostrarEncerrados}
-              onChange={(e) => setMostrarEncerrados(e.target.checked)}
-            />
+            <input type="checkbox" checked={incluirFechados} onChange={(e) => setIncluirFechados(e.target.checked)} />
             <span>Mostrar corrigidos e risco aceito</span>
           </label>
           <button type="button" className="btn btn-outline btn-sm" onClick={limparFiltros}>
@@ -172,47 +183,63 @@ const PaginaDeAchados = () => {
         </div>
       </div>
 
+      {lista.erro ? <Alerta tipo="error">{lista.erro}</Alerta> : null}
+
       <div className="card">
-        {filtrados.length === 0 ? (
+        {lista.carregando && lista.itens.length === 0 ? (
+          <p className="texto-2">Carregando achados...</p>
+        ) : lista.itens.length === 0 ? (
           <EstadoVazio
             titulo="Nenhum achado encontrado"
             descricao="Ajuste os filtros ou marque a opção de mostrar corrigidos e risco aceito."
           />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Severidade</th>
-                <th>Título</th>
-                <th>Sistema</th>
-                <th>Local</th>
-                <th>Estado</th>
-                <th>Ocorrências</th>
-                <th>Última vez</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtrados.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <TagDeSeveridade severidade={a.severidade} />
-                  </td>
-                  <td>
-                    <Link href={`/achados/${a.id}`}>{a.titulo}</Link>
-                  </td>
-                  <td className="texto-2">{sistemaPorId(estado, a.sistemaId)?.nome ?? a.sistemaId}</td>
-                  <td className="mono texto-2">{a.local}</td>
-                  <td>
-                    <SeloDeEstado tipo="achado" estado={a.estado} />
-                  </td>
-                  <td className={`mono ${estilos.linhaDeOcorrencias}`} title={TEXTO_DA_DEDUPLICACAO}>
-                    {a.ocorrencias}×
-                  </td>
-                  <td className="texto-2">{formatarDataHora(a.ultimaVezEm)}</td>
+          <>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Severidade</th>
+                  <th>Título</th>
+                  <th>Sistema</th>
+                  <th>Local</th>
+                  <th>Estado</th>
+                  <th>Ocorrências</th>
+                  <th>Última vez</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lista.itens.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      <TagDeSeveridade severidade={a.severidade} />
+                    </td>
+                    <td>
+                      <Link href={`/achados/${a.id}`}>{a.titulo}</Link>
+                    </td>
+                    <td className="texto-2">{a.sistemaNome}</td>
+                    <td className="mono texto-2">{a.local}</td>
+                    <td>
+                      <SeloDeEstado tipo="achado" estado={a.estado} />
+                    </td>
+                    <td className={`mono ${estilos.linhaDeOcorrencias}`} title={TEXTO_DA_DEDUPLICACAO}>
+                      {a.ocorrencias}×
+                    </td>
+                    <td className="texto-2">{formatarDataHora(a.ultimaVezEm)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {lista.temMais ? (
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={lista.carregandoMais}
+                onClick={() => void lista.carregarMais()}
+              >
+                {lista.carregandoMais ? "Carregando..." : "Carregar mais"}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
     </div>

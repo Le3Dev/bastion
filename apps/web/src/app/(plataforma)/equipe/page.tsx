@@ -2,16 +2,13 @@
 
 import { useState } from "react";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
-import { useArmazem } from "@/prototipo/useArmazem";
 import { AbaAuditoria } from "./_componentes/AbaAuditoria";
 import { AbaMembros } from "./_componentes/AbaMembros";
 
 type AbaDaEquipe = "membros" | "auditoria";
 
 const PaginaDaEquipe = () => {
-  const estado = useArmazem();
   const [aba, setAba] = useState<AbaDaEquipe>("membros");
-  const somenteLeitura = estado.usuarioAtual?.papel === "LEITOR";
 
   return (
     <div className="page-wide pilha">
@@ -36,11 +33,7 @@ const PaginaDaEquipe = () => {
           Auditoria
         </button>
       </div>
-      {aba === "membros" ? (
-        <AbaMembros membros={estado.membros} somenteLeitura={somenteLeitura} />
-      ) : (
-        <AbaAuditoria registros={estado.auditoria} />
-      )}
+      {aba === "membros" ? <AbaMembros /> : <AbaAuditoria />}
     </div>
   );
 };

@@ -1,9 +1,9 @@
+import type { EstadoDaAvaliacao, EstadoDaVerificacao, EstadoDoAchado } from "@bastion/contratos";
 import {
   rotuloDoEstadoDaAvaliacao,
   rotuloDoEstadoDaVerificacao,
   rotuloDoEstadoDoAchado,
-} from "@/prototipo/rotulos";
-import type { EstadoDaAvaliacao, EstadoDaVerificacao, EstadoDoAchado } from "@/prototipo/tipos";
+} from "@/apresentacao/rotulos";
 
 type PropsDoSelo =
   | { tipo: "avaliacao"; estado: EstadoDaAvaliacao }

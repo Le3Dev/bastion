@@ -4,6 +4,8 @@ import {
   hostPertenceAoDominio,
   normalizarHost,
 } from '@bastion/dominio-compartilhado';
+import { ConectorDeIa, type DadosDoConectorDeIa } from './ConectorDeIa';
+import { CredencialDeTeste, type DadosDaCredencialDeTeste } from './CredencialDeTeste';
 import type { EventoDeSistema } from './eventos';
 import { Escopo } from './Escopo';
 import type { MetodoDeVerificacao } from './MetodoDeVerificacao';
@@ -20,7 +22,13 @@ export interface DadosDoSistema {
   verificacao: DadosDaVerificacao;
   ultimaNota: number | null;
   criadoEm: Date;
+  credencialDeTeste?: DadosDaCredencialDeTeste | null;
+  conectorDeIa?: DadosDoConectorDeIa | null;
+  permitirCriacaoDeDadosDeTeste?: boolean;
 }
+
+/** Perfis de avaliação conhecidos pelo contexto de sistemas (sem depender do contexto de avaliações). */
+export type PerfilParaAvaliar = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA';
 
 export interface DadosParaCadastrarSistema {
   id: string;
@@ -36,6 +44,9 @@ export interface DadosParaCadastrarSistema {
 /** Agregado raiz: um sistema de homologação autorizado para avaliação. */
 export class Sistema {
   private eventos: EventoDeSistema[] = [];
+  private _credencialDeTeste: CredencialDeTeste | null = null;
+  private _conectorDeIa: ConectorDeIa | null = null;
+  private _permitirCriacaoDeDadosDeTeste = false;
 
   private constructor(
     readonly id: string,
@@ -93,7 +104,7 @@ export class Sistema {
   }
 
   static reconstituir(dados: DadosDoSistema): Sistema {
-    return new Sistema(
+    const sistema = new Sistema(
       dados.id,
       dados.organizacaoId,
       dados.nome,
@@ -104,6 +115,64 @@ export class Sistema {
       dados.ultimaNota,
       dados.criadoEm,
     );
+    sistema._credencialDeTeste =
+      dados.credencialDeTeste === undefined || dados.credencialDeTeste === null
+        ? null
+        : CredencialDeTeste.reconstituir(dados.credencialDeTeste);
+    sistema._conectorDeIa =
+      dados.conectorDeIa === undefined || dados.conectorDeIa === null
+        ? null
+        : ConectorDeIa.reconstituir(dados.conectorDeIa);
+    sistema._permitirCriacaoDeDadosDeTeste = dados.permitirCriacaoDeDadosDeTeste ?? false;
+    return sistema;
+  }
+
+  get credencialDeTeste(): CredencialDeTeste | null {
+    return this._credencialDeTeste;
+  }
+
+  get conectorDeIa(): ConectorDeIa | null {
+    return this._conectorDeIa;
+  }
+
+  get permitirCriacaoDeDadosDeTeste(): boolean {
+    return this._permitirCriacaoDeDadosDeTeste;
+  }
+
+  definirCredencialDeTeste(credencial: CredencialDeTeste): void {
+    this._credencialDeTeste = credencial;
+  }
+
+  removerCredencialDeTeste(): void {
+    this._credencialDeTeste = null;
+  }
+
+  definirConectorDeIa(conector: ConectorDeIa): void {
+    this._conectorDeIa = conector;
+  }
+
+  removerConectorDeIa(): void {
+    this._conectorDeIa = null;
+  }
+
+  definirConsentimentoDeCriacaoDeDados(valor: boolean): void {
+    this._permitirCriacaoDeDadosDeTeste = valor;
+  }
+
+  /** Verifica se o sistema pode ser avaliado com o perfil (propriedade verificada; IA exige conector). */
+  podeAvaliarComPerfil(perfil: PerfilParaAvaliar, agora: Date): { ok: boolean; motivo?: string } {
+    if (!this.estaVerificado(agora)) {
+      return { ok: false, motivo: 'A propriedade do sistema precisa estar verificada.' };
+    }
+    if (perfil === 'IA') {
+      if (this.tipo !== 'APP_COM_IA') {
+        return { ok: false, motivo: 'O perfil IA só se aplica a sistemas do tipo app com IA.' };
+      }
+      if (this._conectorDeIa === null) {
+        return { ok: false, motivo: 'Configure o conector de IA antes de avaliar com o perfil IA.' };
+      }
+    }
+    return { ok: true };
   }
 
   get hostDeHomologacao(): string {
@@ -170,6 +239,9 @@ export class Sistema {
       verificacao: this._verificacao.paraDados(),
       ultimaNota: this._ultimaNota,
       criadoEm: this.criadoEm,
+      credencialDeTeste: this._credencialDeTeste === null ? null : this._credencialDeTeste.paraDados(),
+      conectorDeIa: this._conectorDeIa === null ? null : this._conectorDeIa.paraDados(),
+      permitirCriacaoDeDadosDeTeste: this._permitirCriacaoDeDadosDeTeste,
     };
   }
 

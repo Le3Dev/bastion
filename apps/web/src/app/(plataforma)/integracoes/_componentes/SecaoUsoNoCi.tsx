@@ -40,7 +40,11 @@ export const SecaoUsoNoCi = () => {
       <pre className="bloco-codigo">{aba === "github" ? exemploGitHubActions : exemploAzurePipelines}</pre>
       <h3>Exemplo com curl</h3>
       <pre className="bloco-codigo">{exemploComCurl}</pre>
-      <Alerta tipo="info">A API real chega na Fase 2. Hoje os exemplos servem de referência do contrato.</Alerta>
+      <Alerta tipo="info">
+        Os exemplos usam a API real do Bastion (prefixo <span className="mono">/v1</span>). Em desenvolvimento, ela roda na
+        porta 3333: defina <span className="mono">BASTION_URL</span> com o endereço da sua instalação e envie a chave no
+        cabeçalho <span className="mono">Authorization: Bearer</span>.
+      </Alerta>
     </div>
   );
 };

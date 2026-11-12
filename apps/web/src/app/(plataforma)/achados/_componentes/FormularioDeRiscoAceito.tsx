@@ -1,11 +1,19 @@
 "use client";
 
+import type { MembroDto } from "@bastion/contratos";
 import { useState, type FormEvent } from "react";
-import type { Membro, RiscoAceito } from "@/prototipo/tipos";
+
+export interface RiscoAceitoInformado {
+  justificativa: string;
+  responsavel: string;
+  /** ISO 8601, fim do dia escolhido. */
+  validoAte: string;
+}
 
 interface PropsDoFormulario {
-  membros: Membro[];
-  aoConfirmar: (risco: RiscoAceito) => void;
+  membros: MembroDto[];
+  enviando?: boolean;
+  aoConfirmar: (risco: RiscoAceitoInformado) => void;
   aoCancelar: () => void;
 }
 
@@ -17,7 +25,7 @@ interface ErrosDoFormulario {
 
 const MINIMO_DA_JUSTIFICATIVA = 20;
 
-export const FormularioDeRiscoAceito = ({ membros, aoConfirmar, aoCancelar }: PropsDoFormulario) => {
+export const FormularioDeRiscoAceito = ({ membros, enviando = false, aoConfirmar, aoCancelar }: PropsDoFormulario) => {
   const [justificativa, setJustificativa] = useState("");
   const [responsavel, setResponsavel] = useState("");
   const [validoAte, setValidoAte] = useState("");
@@ -80,11 +88,13 @@ export const FormularioDeRiscoAceito = ({ membros, aoConfirmar, aoCancelar }: Pr
             aria-invalid={erros.responsavel !== undefined}
           >
             <option value="">Selecione</option>
-            {membros.map((m) => (
-              <option key={m.id} value={m.nome}>
-                {m.nome}
-              </option>
-            ))}
+            {membros
+              .filter((m) => m.estado === "ATIVO")
+              .map((m) => (
+                <option key={m.id} value={m.nome ?? m.email}>
+                  {m.nome ?? m.email}
+                </option>
+              ))}
           </select>
           {erros.responsavel ? <span className="erro-campo">{erros.responsavel}</span> : null}
         </div>
@@ -104,10 +114,10 @@ export const FormularioDeRiscoAceito = ({ membros, aoConfirmar, aoCancelar }: Pr
         </div>
       </div>
       <div className="linha">
-        <button type="submit" className="btn btn-cta">
-          Aceitar o risco
+        <button type="submit" className="btn btn-cta" disabled={enviando}>
+          {enviando ? "Registrando..." : "Aceitar o risco"}
         </button>
-        <button type="button" className="btn btn-outline" onClick={aoCancelar}>
+        <button type="button" className="btn btn-outline" onClick={aoCancelar} disabled={enviando}>
           Cancelar
         </button>
       </div>

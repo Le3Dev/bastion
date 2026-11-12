@@ -7,7 +7,7 @@ const SCRIPT_DE_AVALIACAO = String.raw`set -euo pipefail
 ID=$(curl -sf -X POST "$BASTION_URL/v1/avaliacoes" \
   -H "Authorization: Bearer $BASTION_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"sistemaId":"sis-1","perfil":"PASSIVO","notaMinima":80}' | jq -r '.id')
+  -d '{"sistemaId":"<id-do-sistema>","perfil":"PASSIVO","notaMinima":80}' | jq -r '.id')
 echo "Avaliação solicitada: $ID"
 ESTADO=""
 RESPOSTA=""
@@ -72,7 +72,7 @@ export const exemploComCurl = String.raw`# 1) Solicitar a avaliação
 curl -X POST "$BASTION_URL/v1/avaliacoes" \
   -H "Authorization: Bearer $BASTION_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"sistemaId":"sis-1","perfil":"PASSIVO","notaMinima":80}'
+  -d '{"sistemaId":"<id-do-sistema>","perfil":"PASSIVO","notaMinima":80}'
 
 # 2) Consultar até um estado final (CONCLUIDA, FALHOU ou CANCELADA)
 curl "$BASTION_URL/v1/avaliacoes/<id>" \

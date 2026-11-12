@@ -1,21 +1,27 @@
 "use client";
 
+import type {
+  CorpoDeCadastroDeSistema,
+  MetodoDeVerificacao,
+  RespostaDeCadastroDeSistema,
+  RespostaDeVerificacao,
+  TipoDeSistema,
+} from "@bastion/contratos";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { mensagemDoErro } from "@/api/cliente";
+import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
+import { cadastrarSistema, verificarPropriedade } from "@/api/sistemas";
 import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
-import { cadastrarSistema, sistemaPorId, verificarPropriedade } from "@/prototipo/armazem";
-import { mensagemDeErro } from "@/prototipo/erros";
-import { formatarData } from "@/prototipo/formatacao";
+import { formatarData } from "@/apresentacao/formatacao";
 import {
   metodosDeVerificacaoDisponiveis,
   rotuloDoMetodoDeVerificacao,
   rotuloDoTipoDeSistema,
   tiposDeSistemaDisponiveis,
-} from "@/prototipo/rotulos";
-import type { MetodoDeVerificacao, TipoDeSistema } from "@/prototipo/tipos";
-import { useArmazem } from "@/prototipo/useArmazem";
+} from "@/apresentacao/rotulos";
 import { InstrucoesDeVerificacao } from "../_componentes/InstrucoesDeVerificacao";
 
 const DESCRICAO_DOS_METODOS: Record<MetodoDeVerificacao, string> = {
@@ -44,7 +50,8 @@ const validar = (nome: string, url: string, dominio: string): ErrosDoFormulario 
 
 const PaginaDeCadastroDeSistema = () => {
   const router = useRouter();
-  const estado = useArmazem();
+  const { pode } = useSessao();
+  const podeGerenciar = pode("sistemas");
   const [passo, setPasso] = useState<Passo>(0);
   const [nome, setNome] = useState("");
   const [tipo, setTipo] = useState<TipoDeSistema>("SITE");
@@ -53,39 +60,52 @@ const PaginaDeCadastroDeSistema = () => {
   const [metodo, setMetodo] = useState<MetodoDeVerificacao>("DNS_TXT");
   const [erros, setErros] = useState<ErrosDoFormulario>({});
   const [erroGeral, setErroGeral] = useState<string | null>(null);
-  const [sistemaId, setSistemaId] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [verificando, setVerificando] = useState(false);
+  const [cadastrado, setCadastrado] = useState<{ corpo: CorpoDeCadastroDeSistema; resposta: RespostaDeCadastroDeSistema } | null>(null);
+  const [verificacao, setVerificacao] = useState<RespostaDeVerificacao | null>(null);
 
-  const sistema = sistemaId ? sistemaPorId(estado, sistemaId) : undefined;
-
-  const continuar = (evento: FormEvent<HTMLFormElement>): void => {
+  const continuar = async (evento: FormEvent<HTMLFormElement>): Promise<void> => {
     evento.preventDefault();
     setErroGeral(null);
     const encontrados = validar(nome, urlDeHomologacao, dominioDeProducao);
     setErros(encontrados);
     if (Object.keys(encontrados).length > 0) return;
+    const corpo: CorpoDeCadastroDeSistema = {
+      nome: nome.trim(),
+      tipo,
+      urlDeHomologacao: urlDeHomologacao.trim(),
+      dominioDeProducao: dominioDeProducao.trim(),
+      metodoDeVerificacao: metodo,
+    };
+    setEnviando(true);
     try {
-      const criado = cadastrarSistema({
-        nome,
-        tipo,
-        urlDeHomologacao,
-        dominioDeProducao,
-        metodoDeVerificacao: metodo,
-      });
-      setSistemaId(criado.id);
+      const resposta = await cadastrarSistema(corpo);
+      setCadastrado({ corpo, resposta });
       setPasso(1);
     } catch (erro) {
-      setErroGeral(mensagemDeErro(erro));
+      setErroGeral(mensagemDoErro(erro));
+    } finally {
+      setEnviando(false);
     }
   };
 
-  const verificar = (): void => {
-    if (!sistema) return;
+  const verificar = async (): Promise<void> => {
+    if (!cadastrado) return;
     setErroGeral(null);
+    setVerificando(true);
     try {
-      verificarPropriedade(sistema.id);
-      setPasso(2);
+      const resposta = await verificarPropriedade(cadastrado.resposta.id);
+      if (resposta.verificado) {
+        setVerificacao(resposta);
+        setPasso(2);
+      } else {
+        setErroGeral(resposta.mensagem ?? "A verificação não encontrou a prova de propriedade. Confira as instruções e tente de novo.");
+      }
     } catch (erro) {
-      setErroGeral(mensagemDeErro(erro));
+      setErroGeral(mensagemDoErro(erro));
+    } finally {
+      setVerificando(false);
     }
   };
 
@@ -106,9 +126,10 @@ const PaginaDeCadastroDeSistema = () => {
       </ol>
 
       {erroGeral ? <Alerta tipo="error">{erroGeral}</Alerta> : null}
+      {!podeGerenciar ? <Alerta tipo="warning">{TEXTO_SEM_PERMISSAO}.</Alerta> : null}
 
       {passo === 0 ? (
-        <form className="card" onSubmit={continuar} noValidate>
+        <form className="card" onSubmit={(e) => void continuar(e)} noValidate>
           <div className="field">
             <label className="label" htmlFor="nome">
               Nome do sistema
@@ -121,7 +142,11 @@ const PaginaDeCadastroDeSistema = () => {
             <label className="label" htmlFor="tipo">
               Tipo
             </label>
-            <select id="tipo" className="input" value={tipo} onChange={(e) => {
+            <select
+              id="tipo"
+              className="input"
+              value={tipo}
+              onChange={(e) => {
                 const escolhido = tiposDeSistemaDisponiveis.find((t) => t === e.target.value);
                 if (escolhido) setTipo(escolhido);
               }}
@@ -188,8 +213,13 @@ const PaginaDeCadastroDeSistema = () => {
           </fieldset>
 
           <div className="linha">
-            <button type="submit" className="btn btn-cta">
-              Continuar
+            <button
+              type="submit"
+              className="btn btn-cta"
+              disabled={!podeGerenciar || enviando}
+              title={podeGerenciar ? undefined : TEXTO_SEM_PERMISSAO}
+            >
+              {enviando ? "Cadastrando..." : "Continuar"}
             </button>
             <Link href="/sistemas" className="btn btn-outline">
               Cancelar
@@ -198,39 +228,40 @@ const PaginaDeCadastroDeSistema = () => {
         </form>
       ) : null}
 
-      {passo === 1 && sistema ? (
+      {passo === 1 && cadastrado ? (
         <div className="card pilha">
-          <h2 className="card-titulo">Comprove a propriedade de {sistema.nome}</h2>
-          <InstrucoesDeVerificacao sistema={sistema} />
+          <h2 className="card-titulo">Comprove a propriedade de {cadastrado.corpo.nome}</h2>
+          <InstrucoesDeVerificacao instrucoes={cadastrado.resposta.verificacao} />
           <div className="linha">
-            <button type="button" className="btn btn-cta" onClick={verificar}>
-              Verificar agora
+            <button type="button" className="btn btn-cta" disabled={verificando} onClick={() => void verificar()}>
+              {verificando ? "Verificando..." : "Verificar agora"}
             </button>
-            <button type="button" className="btn btn-outline" onClick={() => router.push("/sistemas")}>
+            <button type="button" className="btn btn-outline" disabled={verificando} onClick={() => router.push("/sistemas")}>
               Verificar depois
             </button>
           </div>
+          {verificando ? <span className="hint">Consultando o ambiente; pode levar até 20 segundos.</span> : null}
         </div>
       ) : null}
 
-      {passo === 2 && sistema ? (
+      {passo === 2 && cadastrado ? (
         <div className="card pilha">
           <Alerta tipo="success">Propriedade comprovada. O sistema está liberado para avaliações.</Alerta>
           <dl className="lista-definicao">
             <dt>Sistema</dt>
-            <dd>{sistema.nome}</dd>
+            <dd>{cadastrado.corpo.nome}</dd>
             <dt>Homologação</dt>
-            <dd className="mono">{sistema.urlDeHomologacao}</dd>
+            <dd className="mono">{cadastrado.corpo.urlDeHomologacao}</dd>
             <dt>Produção</dt>
             <dd>
-              <span className="mono">{sistema.dominioDeProducao}</span>{" "}
-              <span className="tag tag-critica">Bloqueado no Guardião</span>
+              <span className="mono">{cadastrado.corpo.dominioDeProducao}</span>{" "}
+              <span className="tag tag-critica">Bloqueado pelo Guardião</span>
             </dd>
             <dt>Verificação válida até</dt>
-            <dd>{sistema.verificacao.expiraEm ? formatarData(sistema.verificacao.expiraEm) : "—"}</dd>
+            <dd>{verificacao?.expiraEm ? formatarData(verificacao.expiraEm) : "—"}</dd>
           </dl>
           <div className="linha">
-            <Link href={`/avaliacoes/nova?sistemaId=${sistema.id}`} className="btn btn-cta">
+            <Link href={`/avaliacoes/nova?sistemaId=${cadastrado.resposta.id}`} className="btn btn-cta">
               Nova avaliação
             </Link>
             <Link href="/sistemas" className="btn btn-outline">

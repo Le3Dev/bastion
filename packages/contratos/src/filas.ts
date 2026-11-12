@@ -19,6 +19,26 @@ export type NomeDaFila = (typeof FILAS)[keyof typeof FILAS];
 export const chaveDeCancelamento = (avaliacaoId: string): string =>
   `bastion:cancelamento:${avaliacaoId}`;
 
+export const CredencialDeTeste = z.object({
+  modo: z.enum(['FORMULARIO', 'JSON']),
+  urlDeLogin: z.string(),
+  campoUsuario: z.string(),
+  campoSenha: z.string(),
+  usuario: z.string(),
+  senha: z.string(),
+  indicadorDeSucesso: z.string(),
+});
+export type CredencialDeTeste = z.infer<typeof CredencialDeTeste>;
+
+export const ConectorDeIa = z.object({
+  url: z.string(),
+  cabecalhos: z.record(z.string(), z.string()).optional(),
+  modeloDoCorpo: z.string(),
+  caminhoDaResposta: z.string(),
+  frasesSigilosas: z.array(z.string()),
+});
+export type ConectorDeIa = z.infer<typeof ConectorDeIa>;
+
 export const TarefaExecutarAvaliacao = z.object({
   avaliacaoId: z.uuid(),
   organizacaoId: z.uuid(),
@@ -26,6 +46,8 @@ export const TarefaExecutarAvaliacao = z.object({
   perfil: z.enum(PERFIS_DE_AVALIACAO),
   urlDeHomologacao: z.string(),
   escopo: EscopoDaTarefa,
+  credencialDeTeste: CredencialDeTeste.optional(),
+  conectorDeIa: ConectorDeIa.optional(),
 });
 export type TarefaExecutarAvaliacao = z.infer<typeof TarefaExecutarAvaliacao>;
 
