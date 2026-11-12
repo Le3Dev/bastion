@@ -61,6 +61,18 @@ services:
     volumes:
       - ./infra/alvo-de-teste/publico:/usr/share/nginx/html:ro
 
+  # ATENÇÃO: alvo PROPOSITALMENTE VULNERÁVEL (injeção, CORS aberto, IA que vaza
+  # dados...). Só para desenvolvimento e testes dos perfis ativos. NUNCA em produção.
+  alvo-vulneravel:
+    image: node:24-alpine
+    command: node /app/servidor.js
+    environment:
+      PORT: "8080"
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./infra/alvo-de-teste/app-vulneravel:/app:ro
+
 volumes:
   postgres_dados:
   armazenamento_dados:
