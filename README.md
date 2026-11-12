@@ -35,6 +35,35 @@ Para continuar o desenvolvimento em outra máquina, veja a seção 9.2.
 
 A **Fase 1 (protótipo navegável) não precisa de banco de dados nem de variáveis de ambiente**: os dados são fictícios e ficam em memória no navegador.
 
+### Plataforma (Fase 2)
+
+Pré-requisito extra: **Docker Desktop** em execução.
+
+```bash
+cp .env.example .env      # valores só de desenvolvimento
+pnpm infra:subir          # Postgres, Redis, armazenamento S3 e alvo de teste
+pnpm banco:migrar         # migrações geradas + SQL manual (RLS, permissões, auditoria)
+pnpm banco:semear         # dados iniciais (o semeador chega na leva 2)
+pnpm dev                  # web (3000), API (3333) e worker
+pnpm test                 # testes de todos os pacotes
+pnpm infra:parar          # derruba os contêineres (os volumes ficam)
+```
+
+| Porta | Serviço |
+|---|---|
+| 3000 | Web (Next.js) |
+| 3333 | API (Fastify) |
+| 5432 | PostgreSQL 18 (bancos `bastion` e `bastion_teste`) |
+| 6379 | Redis 8 |
+| 9000 / 9001 | Armazenamento S3 (RustFS) / console |
+| 8443 / 8080 | Alvo de teste (HTTPS / HTTP) |
+
+API e worker rodam no host; o Compose só sobe a infraestrutura de desenvolvimento.
+
+**Alvo de teste.** `https://localhost:8443` (e `http://localhost:8080`) é um nginx **propositalmente mal configurado**, o único alvo dos testes ponta a ponta. Usa certificado autoassinado de 20 dias e tem falhas de propósito: versão do servidor exposta, `X-Powered-By` vazando a versão do PHP, cookie sem `HttpOnly`, `Secure` e `SameSite`, e nenhum cabeçalho de segurança (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy). Os testes gravam `bastion-verificacao.txt` em `infra/alvo-de-teste/publico/.well-known/`. Como ele roda em rede privada, o `.env` traz `GUARDIAO_PERMITIR_REDES_PRIVADAS=true`, que é **só para dev e proibido em produção**.
+
+> Aviso: os papéis do Postgres (`bastion_migrador`, `bastion_app`) e as credenciais do S3 usam senhas de desenvolvimento, versionadas em `infra/` e no `.env.example`. Nunca as reutilize fora da máquina local.
+
 ## 3. Tecnologias
 
 ### Em uso (Fase 1)
@@ -54,8 +83,9 @@ A **Fase 1 (protótipo navegável) não precisa de banco de dados nem de variáv
 | API e worker | Node + Fastify |
 | Banco | PostgreSQL (isolamento por organização) |
 | Fila | BullMQ + Redis |
-| Arquivos | S3 ou MinIO (MinIO no dev) |
-| Dev local | Docker Compose (Postgres, Redis, MinIO) |
+| Banco (acesso) | Drizzle ORM + drizzle-kit + `pg`, com SQL manual para RLS (ADR 10) |
+| Arquivos | S3 ou compatível (RustFS no dev, ADR 9) |
+| Dev local | Docker Compose (Postgres, Redis, RustFS, alvo de teste) |
 | Testes | Vitest (domínio) + Playwright (telas principais) |
 | PDF | HTML para PDF com Playwright |
 
@@ -148,6 +178,8 @@ apps/web/src/
 | 6 | Tema "Sinalização" simples, de alto contraste e sem dependências; a rede do ambiente de build pode ser restrita | CSS puro com tokens em `globals.css`, sem Tailwind e sem `next/font` | Os tokens (únicas cores em hex) vivem em um só `:root`; o resto usa `var(--token)`. Classes utilitárias próprias (`.btn`, `.card`, `.tag`...) precisam ser mantidas à mão |
 | 7 | Validar telas e fluxos antes de existir a API | Protótipo com dados fictícios em memória, usando as mesmas máquinas de estado e a mesma linguagem ubíqua do domínio | Telas migram para a API real trocando o armazém; tudo se perde ao recarregar a página |
 | 8 | TypeScript 7.0 já existe, mas o ecossistema do Next 16 foi validado com a série 6 | Usar TypeScript 6.0 (`~6.0.3`) | Atualizar para 7.x só depois de confirmar a compatibilidade com Next e ESLint |
+| 9 | O repositório oficial `minio/minio` saiu do Docker Hub, e o dev precisa de um armazenamento compatível com S3 | RustFS (`rustfs/rustfs:1.0.5`) no Docker Compose, acessado só pelo SDK S3 | Trocar por S3, MinIO ou outro compatível é só configuração (`S3_*` no `.env`) |
+| 10 | Precisamos de migrações versionadas, tipos fortes e RLS do Postgres, que ORMs não declaram | Drizzle ORM + drizzle-kit: tabelas em TypeScript, SQL gerado e versionado; RLS, permissões e a regra "auditoria só inclusão" em SQL manual idempotente (`apps/api/migracoes/manuais`). Papéis separados: `bastion_migrador` (dono) e `bastion_app` (sem `BYPASSRLS`) | Tabelas de autenticação (`usuarios`, `sessoes`, `chaves_de_api`) e do outbox (`eventos_de_saida`, `eventos_processados`) são globais, sem RLS: são lidas antes de existir o contexto da organização (login, chave de API) ou pelo worker, e seus repositórios sempre filtram por `organizacao_id` ao listar. Toda mudança de RLS exige um novo arquivo manual |
 
 ## 5. Escopo do MVP
 

@@ -1,0 +1,129 @@
+import { describe, expect, it } from 'vitest';
+import { Escopo } from './Escopo';
+import { Sistema, type DadosParaCadastrarSistema } from './Sistema';
+
+const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+const AGORA = new Date('2026-01-10T12:00:00Z');
+
+const base = (sobrescrever: Partial<DadosParaCadastrarSistema> = {}): DadosParaCadastrarSistema => ({
+  id: 's-1',
+  organizacaoId: 'org-1',
+  nome: 'Loja (homologação)',
+  tipo: 'SITE',
+  urlDeHomologacao: 'https://hml.exemplo-loja.net/',
+  dominioDeProducao: 'Loja.com.br.',
+  metodoDeVerificacao: 'DNS_TXT',
+  token: TOKEN,
+  ...sobrescrever,
+});
+
+const codigoDe = (fn: () => void): unknown => {
+  try {
+    fn();
+  } catch (erro) {
+    return (erro as { codigo?: unknown }).codigo;
+  }
+  return undefined;
+};
+
+describe('Sistema', () => {
+  it('cadastra, normaliza o domínio e emite SistemaCadastrado', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    expect(sistema.dominioDeProducao).toBe('loja.com.br');
+    expect(sistema.hostDeHomologacao).toBe('hml.exemplo-loja.net');
+    expect(sistema.verificacao.estado).toBe('PENDENTE');
+    expect(sistema.puxarEventos().map((e) => e.tipo)).toEqual(['SistemaCadastrado']);
+  });
+
+  it('exige nome', () => {
+    expect(codigoDe(() => Sistema.cadastrar(base({ nome: '  ' }), AGORA))).toBe('NOME_OBRIGATORIO');
+  });
+
+  it('exige URL https válida', () => {
+    expect(codigoDe(() => Sistema.cadastrar(base({ urlDeHomologacao: 'http://hml.x.net' }), AGORA))).toBe(
+      'URL_INVALIDA',
+    );
+    expect(codigoDe(() => Sistema.cadastrar(base({ urlDeHomologacao: 'lixo' }), AGORA))).toBe(
+      'URL_INVALIDA',
+    );
+  });
+
+  it('exige domínio de produção', () => {
+    expect(codigoDe(() => Sistema.cadastrar(base({ dominioDeProducao: ' ' }), AGORA))).toBe(
+      'DOMINIO_DE_PRODUCAO_OBRIGATORIO',
+    );
+  });
+
+  it('bloqueia homologação igual ou subdomínio de produção', () => {
+    for (const url of ['https://loja.com.br', 'https://hml.loja.com.br/app', 'https://LOJA.com.br:8443']) {
+      expect(codigoDe(() => Sistema.cadastrar(base({ urlDeHomologacao: url }), AGORA))).toBe(
+        'HOMOLOGACAO_EM_PRODUCAO',
+      );
+    }
+    expect(() => Sistema.cadastrar(base({ urlDeHomologacao: 'https://hml.loja.com.br' }), AGORA)).toThrow(
+      'A URL de homologação pertence ao domínio de produção declarado; o Bastion nunca avalia produção.',
+    );
+  });
+
+  it('não confunde loja.com.br.evil.com com produção', () => {
+    expect(() =>
+      Sistema.cadastrar(base({ urlDeHomologacao: 'https://loja.com.br.evil.com' }), AGORA),
+    ).not.toThrow();
+  });
+
+  it('registra sucesso e falha da verificação com eventos', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.puxarEventos();
+    sistema.registrarResultadoDaVerificacao(false, 'TXT não encontrado', AGORA);
+    expect(sistema.estaVerificado(AGORA)).toBe(false);
+    expect(sistema.verificacao.mensagem).toBe('TXT não encontrado');
+    sistema.registrarResultadoDaVerificacao(true, '', AGORA);
+    expect(sistema.estaVerificado(AGORA)).toBe(true);
+    expect(sistema.puxarEventos().map((e) => e.tipo)).toEqual([
+      'VerificacaoDeSistemaFalhou',
+      'SistemaVerificado',
+    ]);
+  });
+
+  it('a verificação expira após 90 dias', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.registrarResultadoDaVerificacao(true, '', AGORA);
+    expect(sistema.estaVerificado(new Date('2026-04-09T12:00:00Z'))).toBe(true);
+    expect(sistema.estaVerificado(new Date('2026-04-11T12:00:00Z'))).toBe(false);
+  });
+
+  it('trocar o método volta a verificação para pendente', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.registrarResultadoDaVerificacao(true, '', AGORA);
+    sistema.trocarMetodoDeVerificacao('CABECALHO_HTTP', 'f'.repeat(32));
+    expect(sistema.verificacao.metodo).toBe('CABECALHO_HTTP');
+    expect(sistema.estaVerificado(AGORA)).toBe(false);
+  });
+
+  it('monta o escopo com 5 req/s e produção bloqueada', () => {
+    const escopo = Sistema.cadastrar(base(), AGORA).escopo();
+    expect(escopo.paraDados()).toEqual({
+      hostsPermitidos: ['hml.exemplo-loja.net'],
+      dominiosBloqueados: ['loja.com.br'],
+      requisicoesPorSegundo: 5,
+    });
+    expect(escopo).toBeInstanceOf(Escopo);
+  });
+
+  it('valida a última nota (inteiro de 0 a 100)', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.atualizarUltimaNota(87);
+    expect(sistema.ultimaNota).toBe(87);
+    for (const invalida of [-1, 101, 50.5, Number.NaN]) {
+      expect(codigoDe(() => sistema.atualizarUltimaNota(invalida))).toBe('NOTA_INVALIDA');
+    }
+  });
+
+  it('reconstitui a partir dos dados', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.registrarResultadoDaVerificacao(true, '', AGORA);
+    const copia = Sistema.reconstituir(sistema.paraDados());
+    expect(copia.paraDados()).toEqual(sistema.paraDados());
+    expect(copia.puxarEventos()).toEqual([]);
+  });
+});

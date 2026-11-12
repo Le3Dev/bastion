@@ -10,3 +10,11 @@ coverage
 
 # Gerado e recriado automaticamente pelo `next dev` (instruções para agentes de IA); a documentação do projeto fica só no README.md
 apps/web/AGENTS.md
+
+# Arquivos gravados pelos testes no alvo de teste
+infra/alvo-de-teste/publico/.well-known/*
+!infra/alvo-de-teste/publico/.well-known/.gitkeep
+
+# Relatórios do Playwright
+playwright-report/
+test-results/

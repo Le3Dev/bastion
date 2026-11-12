@@ -6,9 +6,15 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter @bastion/web dev",
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "infra:subir": "docker compose up -d --wait",
+    "infra:parar": "docker compose down",
+    "banco:gerar": "pnpm --filter @bastion/api banco:gerar",
+    "banco:migrar": "pnpm --filter @bastion/api banco:migrar",
+    "banco:semear": "pnpm --filter @bastion/api banco:semear"
   }
 }
