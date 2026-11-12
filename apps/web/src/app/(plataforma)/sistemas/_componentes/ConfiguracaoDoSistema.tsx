@@ -6,7 +6,6 @@ import { mensagemDoErro } from "@/api/cliente";
 import { TEXTO_SEM_PERMISSAO } from "@/api/sessao";
 import {
   definirConectorDeIa,
-  definirConsentimentoDeDados,
   definirCredencialDeTeste,
   removerConectorDeIa,
   removerCredencialDeTeste,
@@ -303,27 +302,9 @@ export const ConfiguracaoDoSistema = ({ sistema, podeGerenciar, aoAlterar }: Pro
         </section>
       ) : null}
 
-      <section className="pilha" aria-label="Consentimento de criação de dados">
-        <h3 className="card-titulo">Criação de registros de teste</h3>
-        <label className="linha" htmlFor={titulo("consentimento")}>
-          <input
-            id={titulo("consentimento")}
-            type="checkbox"
-            role="switch"
-            checked={sistema.permitirCriacaoDeDadosDeTeste}
-            disabled={desabilitado}
-            title={dica}
-            onChange={(e) =>
-              void executar(
-                () => definirConsentimentoDeDados(id, e.target.checked),
-                e.target.checked ? "Criação de registros de teste permitida." : "Criação de registros de teste desativada.",
-              )
-            }
-          />
-          Permitir que o perfil Completo crie registros de teste na homologação
-        </label>
-        <span className="hint">Os registros criados são marcados com o prefixo bastion-teste-.</span>
-      </section>
+      <span className="hint">
+        A permissão de criar registros de teste (marcados com o prefixo bastion-teste-) é escolhida ao iniciar a avaliação Completo.
+      </span>
     </div>
   );
 };

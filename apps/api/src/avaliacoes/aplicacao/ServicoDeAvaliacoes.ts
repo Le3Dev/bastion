@@ -300,7 +300,7 @@ export class ServicoDeAvaliacoes {
           (await this.repositorio.notaMinimaDaUltimaAvaliacao(tx, sistema.id)) ??
           NOTA_MINIMA_PADRAO;
         const permitirCriacaoDeDados = dados.perfil === 'COMPLETO' && dados.permitirCriacaoDeDados === true;
-        this.exigirPerfilAplicavel(sistema, dados.perfil, permitirCriacaoDeDados, agora);
+        this.exigirPerfilAplicavel(sistema, dados.perfil, agora);
         const nova = Avaliacao.solicitar(
           {
             id: gerarIdentificador(),
@@ -412,7 +412,6 @@ export class ServicoDeAvaliacoes {
   private exigirPerfilAplicavel(
     sistema: Sistema,
     perfil: DadosDaCriacao['perfil'],
-    permitirCriacaoDeDados: boolean,
     agora: Date,
   ): void {
     if (perfil === 'IA') {
@@ -433,12 +432,6 @@ export class ServicoDeAvaliacoes {
     const aptidao = sistema.podeAvaliarComPerfil(perfil, agora);
     if (!aptidao.ok && sistema.estaVerificado(agora)) {
       throw new ErroDeDominio(aptidao.motivo ?? 'Perfil indisponível.', 'PERFIL_INDISPONIVEL');
-    }
-    if (perfil === 'COMPLETO' && permitirCriacaoDeDados && !sistema.permitirCriacaoDeDadosDeTeste) {
-      throw new ErroDeDominio(
-        'A criação de dados de teste exige o consentimento registrado no sistema.',
-        'CONSENTIMENTO_AUSENTE',
-      );
     }
   }
 

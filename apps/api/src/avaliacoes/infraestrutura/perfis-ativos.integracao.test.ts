@@ -97,17 +97,8 @@ describe('perfis ativos: autorização e escopo da tarefa', () => {
     expect(dto.json<{ autorizacao: unknown }>().autorizacao).toEqual(AUTORIZACAO);
   });
 
-  it('criação de dados só vale no COMPLETO e com o consentimento do sistema', async () => {
+  it('criação de dados vale só no COMPLETO e é autorizada no próprio formulário', async () => {
     const sistemaId = await cadastrarSistema();
-    const semConsentimento = await solicitar(sistemaId, {
-      perfil: 'COMPLETO',
-      autorizacao: PEDIDO_AUTORIZACAO,
-      permitirCriacaoDeDados: true,
-    });
-    expect(semConsentimento.statusCode).toBe(422);
-    expect(semConsentimento.json<ErroJson>().erro.codigo).toBe('CONSENTIMENTO_AUSENTE');
-
-    expect((await configurar(sistemaId, 'consentimento-de-dados', { permitir: true }, 'PATCH')).statusCode).toBe(200);
     const aceita = await solicitar(sistemaId, {
       perfil: 'COMPLETO',
       autorizacao: PEDIDO_AUTORIZACAO,
