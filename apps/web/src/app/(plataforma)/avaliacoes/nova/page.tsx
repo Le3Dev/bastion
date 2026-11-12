@@ -63,7 +63,7 @@ const FormularioDeNovaAvaliacao = () => {
   const [aceito, setAceito] = useState(false);
   const [permitirCriacaoDeDados, setPermitirCriacaoDeDados] = useState(false);
 
-  const sistemas = dados ?? [];
+  const sistemas = (dados ?? []).filter((s) => !s.arquivado);
   const sistema = sistemaId ? sistemas.find((s) => s.id === sistemaId) : undefined;
   const ativo = ehPerfilAtivo(perfil);
   const autorizado = !ativo || (responsavel.trim() !== "" && referencia.trim() !== "" && aceito);

@@ -7,6 +7,7 @@ import {
   type CorpoDeConectorDeIa,
   type CorpoDeCredencialDeTeste,
   type CorpoDeVerificacao,
+  type MetodoDeVerificacao,
 } from "@bastion/contratos";
 import { z } from "zod";
 import { requisitar, requisitarSemCorpo } from "./cliente";
@@ -37,8 +38,12 @@ export const definirConectorDeIa = (id: string, corpo: CorpoDeConectorDeIa): Pro
 export const removerConectorDeIa = (id: string): Promise<undefined> =>
   requisitarSemCorpo(`/v1/sistemas/${id}/conector-de-ia`, { metodo: "DELETE" });
 
-export const definirConsentimentoDeDados = (id: string, permitir: boolean): Promise<undefined> =>
-  requisitarSemCorpo(`/v1/sistemas/${id}/consentimento-de-dados`, { metodo: "PATCH", corpo: { permitir } });
+export const arquivarSistema = (id: string): Promise<SistemaDto> =>
+  requisitar(`/v1/sistemas/${id}/arquivar`, { metodo: "POST", esquema: SistemaDto });
+
+/** Volta a verificação para PENDENTE e devolve as instruções do novo método. */
+export const trocarMetodo = (id: string, metodo: MetodoDeVerificacao): Promise<InstrucoesDeVerificacaoDto> =>
+  requisitar(`/v1/sistemas/${id}/metodo`, { metodo: "PATCH", corpo: { metodo }, esquema: InstrucoesDeVerificacaoDto });
 
 /** Pode levar até 20 s; a API responde 504 VERIFICACAO_DEMOROU se estourar. */
 export const verificarPropriedade = (id: string, corpo: CorpoDeVerificacao = {}): Promise<RespostaDeVerificacao> =>
