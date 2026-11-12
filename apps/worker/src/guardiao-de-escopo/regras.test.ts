@@ -4,6 +4,7 @@ import { avaliarRedirecionamento, avaliarRequisicao } from './regras';
 const escopo = {
   hostsPermitidos: ['hml.exemplo-loja.net'],
   dominiosBloqueados: ['loja.com.br'],
+  metodosPermitidos: ['GET', 'HEAD'],
 };
 
 describe('avaliarRequisicao', () => {
@@ -30,11 +31,34 @@ describe('avaliarRequisicao', () => {
     expect(avaliarRequisicao({ url: 'não-é-url', metodo: 'GET', perfil: 'PADRAO', escopo }).permitida).toBe(false);
   });
 
-  it('bloqueia POST no perfil passivo, mas não no completo', () => {
+  it('bloqueia método fora de metodosPermitidos e libera quando o escopo o autoriza', () => {
     const url = 'https://hml.exemplo-loja.net/login';
     const passivo = avaliarRequisicao({ url, metodo: 'POST', perfil: 'PASSIVO', escopo });
-    expect(passivo).toEqual({ permitida: false, motivo: 'Método não permitido no perfil passivo' });
-    expect(avaliarRequisicao({ url, metodo: 'POST', perfil: 'COMPLETO', escopo }).permitida).toBe(true);
+    expect(passivo.permitida).toBe(false);
+    expect(passivo.motivo).toContain('Método POST não permitido');
+    const completo = { ...escopo, metodosPermitidos: ['GET', 'HEAD', 'POST'] };
+    expect(avaliarRequisicao({ url, metodo: 'post', perfil: 'COMPLETO', escopo: completo }).permitida).toBe(true);
+  });
+
+  it('bloqueia caminhos excluídos pelo prefixo, mas não os vizinhos', () => {
+    const comExclusao = { ...escopo, caminhosExcluidos: ['/admin', '/pagamento'] };
+    const pedir = (caminho: string) =>
+      avaliarRequisicao({ url: `https://hml.exemplo-loja.net${caminho}`, metodo: 'GET', perfil: 'PADRAO', escopo: comExclusao });
+    expect(pedir('/admin/usuarios').permitida).toBe(false);
+    expect(pedir('/admin/usuarios').motivo).toContain('Caminho excluído');
+    expect(pedir('/pagamento').permitida).toBe(false);
+    expect(pedir('/administracao-publica').permitida).toBe(false);
+    expect(pedir('/loja').permitida).toBe(true);
+  });
+
+  it('produção continua vindo antes das demais regras', () => {
+    const decisao = avaliarRequisicao({
+      url: 'https://www.loja.com.br/admin',
+      metodo: 'DELETE',
+      perfil: 'COMPLETO',
+      escopo: { ...escopo, caminhosExcluidos: ['/admin'] },
+    });
+    expect(decisao.motivo).toBe('Domínio de produção declarado');
   });
 
   it('bloqueia host fora do escopo', () => {
@@ -47,6 +71,7 @@ describe('avaliarRequisicao', () => {
     const escopoPerigoso = {
       hostsPermitidos: ['loja.com.br', 'www.loja.com.br'],
       dominiosBloqueados: ['loja.com.br'],
+      metodosPermitidos: ['GET', 'HEAD'],
     };
     for (const url of ['https://loja.com.br/', 'https://www.loja.com.br/', 'https://a.b.loja.com.br:444/']) {
       expect(

@@ -51,7 +51,7 @@ export function criarVerificadorDePropriedade(deps: DependenciasDoVerificador): 
       url: alvo,
       metodo: 'GET',
       perfil: 'PASSIVO',
-      escopo: { hostsPermitidos: [host], dominiosBloqueados: [] },
+      escopo: { hostsPermitidos: [host], dominiosBloqueados: [], metodosPermitidos: ['GET', 'HEAD'] },
     });
     if (resposta.status === 404) return falha(`Arquivo não encontrado em ${alvo} (HTTP 404).`);
     if (resposta.status < 200 || resposta.status >= 300) {
@@ -68,7 +68,7 @@ export function criarVerificadorDePropriedade(deps: DependenciasDoVerificador): 
       url: url.toString(),
       metodo: 'GET',
       perfil: 'PASSIVO',
-      escopo: { hostsPermitidos: [host], dominiosBloqueados: [] },
+      escopo: { hostsPermitidos: [host], dominiosBloqueados: [], metodosPermitidos: ['GET', 'HEAD'] },
     });
     const bruto = resposta.cabecalhos[CABECALHO_DE_VERIFICACAO];
     const valor = (Array.isArray(bruto) ? bruto[0] : bruto)?.trim();

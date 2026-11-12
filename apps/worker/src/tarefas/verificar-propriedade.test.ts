@@ -82,7 +82,11 @@ describe('verificador de propriedade', () => {
           url: 'https://homolog.exemplo.com:8443/.well-known/bastion-verificacao.txt',
           metodo: 'GET',
           perfil: 'PASSIVO',
-          escopo: { hostsPermitidos: ['homolog.exemplo.com'], dominiosBloqueados: [] },
+          escopo: {
+            hostsPermitidos: ['homolog.exemplo.com'],
+            dominiosBloqueados: [],
+            metodosPermitidos: ['GET', 'HEAD'],
+          },
         }),
       );
     });

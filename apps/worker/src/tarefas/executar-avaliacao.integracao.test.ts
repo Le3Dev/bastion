@@ -69,6 +69,10 @@ describe('executor de avaliação contra o alvo de teste', () => {
         dominiosBloqueados: ['producao.exemplo.com'],
         requisicoesPorSegundo: 5,
         tempoMaximoMs: 120_000,
+        metodosPermitidos: ['GET', 'HEAD'],
+        caminhosExcluidos: [],
+        tetoDeRequisicoes: 500,
+        permitirCriacaoDeDados: false,
       },
     };
     await executor.executar(tarefa);

@@ -21,6 +21,10 @@ function tarefa(url: string, extra: Partial<TarefaExecutarAvaliacao['escopo']> =
       dominiosBloqueados: ['exemplo.com.br'],
       requisicoesPorSegundo: 5,
       tempoMaximoMs: 60_000,
+      metodosPermitidos: ['GET', 'HEAD'],
+      caminhosExcluidos: [],
+      tetoDeRequisicoes: 500,
+      permitirCriacaoDeDados: false,
       ...extra,
     },
   };

@@ -60,7 +60,11 @@ function novoCliente(permitirRedesPrivadas: boolean, decisoes: DecisaoRegistrada
   return cliente;
 }
 
-const escopo = (...hosts: string[]) => ({ hostsPermitidos: hosts, dominiosBloqueados: [] });
+const escopo = (...hosts: string[]) => ({
+  hostsPermitidos: hosts,
+  dominiosBloqueados: [],
+  metodosPermitidos: ['GET', 'HEAD'],
+});
 
 describe('cliente HTTP do Guardião de Escopo', () => {
   it('bloqueia antes de conectar quando redes privadas não são permitidas (IP literal)', async () => {

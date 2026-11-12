@@ -44,6 +44,11 @@ export interface PedidoHttp {
   limitador?: LimitadorDeTaxa;
   /** Chamado além do `aoDecidir` do cliente, para cada decisão deste pedido. */
   aoDecidir?: (decisao: DecisaoRegistrada) => void;
+  /**
+   * Devolve a resposta 3xx como veio, sem seguir o `Location` (usado para inspecionar
+   * redirecionamentos e capturar cookies de sessão). Nada é requisitado além do pedido.
+   */
+  naoSeguirRedirecionamentos?: boolean;
 }
 
 export interface PedidoDeWebhook {
@@ -185,6 +190,7 @@ export function criarClienteHttp(opcoes: OpcoesDoClienteHttp): ClienteHttp {
       corpo?: string;
       limitador?: LimitadorDeTaxa;
       aoDecidir?: (d: DecisaoRegistrada) => void;
+      naoSeguirRedirecionamentos?: boolean;
     },
     politica: Politica,
   ): Promise<RespostaHttp> {
@@ -242,6 +248,7 @@ export function criarClienteHttp(opcoes: OpcoesDoClienteHttp): ClienteHttp {
       const local = resposta.cabecalhos['location'];
       const destino = Array.isArray(local) ? local[0] : local;
       if (!STATUS_DE_REDIRECIONAMENTO.has(resposta.status) || destino === undefined) return resposta;
+      if (pedido.naoSeguirRedirecionamentos === true && politica.seguirRedirecionamentos) return resposta;
 
       // Redirecionamento manual: o próximo salto passa de novo por todas as regras.
       let proximo: string;

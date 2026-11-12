@@ -8,3 +8,4 @@ export {
   type PedidoDeRequisicao,
 } from './regras';
 export { LimitadorDeTaxa } from './limitador-de-taxa';
+export { aplicarFreios, CircuitoDeFalhas, ErroDeFreio, type ClienteComFreios } from './freios';
