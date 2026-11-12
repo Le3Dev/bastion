@@ -45,5 +45,11 @@ export const paraAvaliacaoDto = (
     motivoDaFalha: dados.motivoDaFalha,
     relatorioId: complementos.relatorioId,
     contagemDeAchados: contagemCompleta(complementos.contagemDeAchados),
+    autorizacao: avaliacao.autorizacao
+      ? {
+          responsavel: avaliacao.autorizacao.responsavel,
+          referencia: avaliacao.autorizacao.referencia,
+        }
+      : null,
   };
 };

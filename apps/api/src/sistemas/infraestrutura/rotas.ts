@@ -1,5 +1,7 @@
 import {
   CorpoDeCadastroDeSistema,
+  CorpoDeConectorDeIa,
+  CorpoDeCredencialDeTeste,
   CorpoDeVerificacao,
   InstrucoesDeVerificacaoDto,
   ParametroId,
@@ -52,6 +54,62 @@ export const rotasDeSistemas =
         schema: { params: ParametroId, response: { 200: InstrucoesDeVerificacaoDto } },
       },
       async (request) => sistemas.instrucoes(contextoDe(request), request.params.id),
+    );
+
+    app.put(
+      '/v1/sistemas/:id/credencial-de-teste',
+      {
+        preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: { params: ParametroId, body: CorpoDeCredencialDeTeste, response: { 200: SistemaDto } },
+      },
+      async (request) =>
+        sistemas.definirCredencialDeTeste(contextoDe(request), request.params.id, request.body),
+    );
+
+    app.delete(
+      '/v1/sistemas/:id/credencial-de-teste',
+      {
+        preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: { params: ParametroId, response: { 200: SistemaDto } },
+      },
+      async (request) => sistemas.removerCredencialDeTeste(contextoDe(request), request.params.id),
+    );
+
+    app.put(
+      '/v1/sistemas/:id/conector-de-ia',
+      {
+        preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: { params: ParametroId, body: CorpoDeConectorDeIa, response: { 200: SistemaDto } },
+      },
+      async (request) =>
+        sistemas.definirConectorDeIa(contextoDe(request), request.params.id, request.body),
+    );
+
+    app.delete(
+      '/v1/sistemas/:id/conector-de-ia',
+      {
+        preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: { params: ParametroId, response: { 200: SistemaDto } },
+      },
+      async (request) => sistemas.removerConectorDeIa(contextoDe(request), request.params.id),
+    );
+
+    app.patch(
+      '/v1/sistemas/:id/consentimento-de-dados',
+      {
+        preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: {
+          params: ParametroId,
+          body: z.object({ permitir: z.boolean() }),
+          response: { 200: SistemaDto },
+        },
+      },
+      async (request) =>
+        sistemas.definirConsentimentoDeDados(
+          contextoDe(request),
+          request.params.id,
+          request.body.permitir,
+        ),
     );
 
     app.post(

@@ -6,6 +6,7 @@ import { ServicoDeAuditoria } from './auditoria/aplicacao/ServicoDeAuditoria';
 import { rotasDeAuditoria } from './auditoria/infraestrutura/rotas';
 import { ServicoDeAvaliacoes } from './avaliacoes/aplicacao/ServicoDeAvaliacoes';
 import { rotasDeAvaliacoes } from './avaliacoes/infraestrutura/rotas';
+import { criarCifragem } from './compartilhado/cifragem';
 import type { Dependencias } from './compartilhado/dependencias';
 import { rotasDeSaude } from './compartilhado/rotas-de-saude';
 import { ServicoDeChavesDeApi } from './contas/aplicacao/ServicoDeChavesDeApi';
@@ -52,7 +53,8 @@ export const criarServicos = ({
   aoVivo,
 }: Dependencias): Servicos => {
   const auditoria = new ServicoDeAuditoria(relogio);
-  const sistemas = new ServicoDeSistemas(db, filas, relogio, auditoria);
+  const cifragem = criarCifragem(config.chaveDeCifragem);
+  const sistemas = new ServicoDeSistemas(db, filas, relogio, auditoria, cifragem);
   const achados = new ServicoDeAchados(db, filas, relogio, auditoria);
   const relatorios = new ServicoDeRelatorios(db, armazenamento, relogio, auditoria);
   const avaliacoes = new ServicoDeAvaliacoes(
@@ -64,6 +66,7 @@ export const criarServicos = ({
     achados,
     relatorios,
     aoVivo,
+    cifragem,
   );
   return {
     auditoria,

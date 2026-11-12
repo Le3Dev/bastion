@@ -40,6 +40,7 @@ const DESCRICAO_DO_PERFIL: Readonly<Record<RelatorioDto['perfil'], string>> = {
     'Passivo: apenas leitura. Cabeçalhos HTTP, cookies, certificado e protocolo TLS foram observados sem enviar cargas de ataque.',
   PADRAO: 'Padrão: verificações passivas com sondagens leves no ambiente de homologação.',
   COMPLETO: 'Completo: todas as verificações disponíveis, sempre limitadas ao ambiente de homologação.',
+  IA: 'IA: avaliação de um aplicativo com inteligência artificial por meio do conector configurado, sempre limitada ao ambiente de homologação.',
 };
 
 const formatarData = (iso: string): string =>

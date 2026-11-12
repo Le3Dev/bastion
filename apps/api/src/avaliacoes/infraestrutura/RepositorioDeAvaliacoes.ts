@@ -41,6 +41,8 @@ const paraAgregado = (linha: LinhaDeAvaliacao, etapas: readonly LinhaDeEtapa[]):
     concluidaEm: linha.concluidaEm,
     motivoDaFalha: linha.motivoDaFalha,
     achadoRevalidadoId: linha.achadoRevalidadoId,
+    autorizacao: linha.autorizacao,
+    permitirCriacaoDeDados: linha.permitirCriacaoDeDados,
   });
 
 export interface FiltroDeAvaliacoes {
@@ -81,6 +83,8 @@ export class RepositorioDeAvaliacoes {
       concluidaEm: dados.concluidaEm,
       motivoDaFalha: dados.motivoDaFalha,
       achadoRevalidadoId: dados.achadoRevalidadoId ?? null,
+      autorizacao: dados.autorizacao ?? null,
+      permitirCriacaoDeDados: dados.permitirCriacaoDeDados ?? false,
     });
     if (dados.etapas.length > 0) {
       await tx.insert(etapasDaAvaliacao).values(

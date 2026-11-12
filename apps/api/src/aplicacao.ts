@@ -44,7 +44,7 @@ export const criarAplicacao = async (
   await app.register(cors, {
     origin: config.origemDaWeb,
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   await app.register(cookie);
   if (config.limiteDeTaxaAtivo) {

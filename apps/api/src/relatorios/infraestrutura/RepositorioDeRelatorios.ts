@@ -1,3 +1,4 @@
+import type { PerfilDeAvaliacao } from '@bastion/contratos';
 import type { Severidade } from '@bastion/dominio-compartilhado';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { EstadoDoAchado } from '../../achados/dominio/EstadoDoAchado';
@@ -22,7 +23,7 @@ export interface LinhaDeRelatorio {
   nota: number;
   resumo: string;
   chaveDoPdf: string | null;
-  perfil: 'PASSIVO' | 'PADRAO' | 'COMPLETO';
+  perfil: PerfilDeAvaliacao;
   notaMinima: number;
   urlDeHomologacao: string;
   dominioDeProducao: string;

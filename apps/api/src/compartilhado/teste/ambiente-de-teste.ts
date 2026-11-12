@@ -139,6 +139,7 @@ export const criarAmbienteDeTeste = async (): Promise<AmbienteDeTeste> => {
     sessaoCookieSeguro: false,
     sessaoDuracaoHoras: 12,
     limiteDeTaxaAtivo: false,
+    chaveDeCifragem: Buffer.alloc(32, 7),
   };
   const conexao = criarConexao(urlDoApp);
   const migrador = new pg.Pool({ connectionString: urlDoMigrador, max: 2 });

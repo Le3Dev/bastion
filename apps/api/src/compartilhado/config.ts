@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { lerChaveDeCifragem } from './cifragem';
 
 const Booleano = (padrao: boolean) =>
   z
@@ -19,7 +20,29 @@ const EsquemaDoAmbiente = z.object({
   SESSAO_COOKIE_SEGURO: Booleano(false),
   SESSAO_DURACAO_HORAS: z.coerce.number().positive().default(12),
   API_LIMITE_DE_TAXA: Booleano(true),
+  CHAVE_DE_CIFRAGEM: z.string().optional(),
 });
+
+/** Chave FIXA só para desenvolvimento/testes; nunca use em produção (lá a variável é obrigatória). */
+const CHAVE_DE_CIFRAGEM_DE_DESENVOLVIMENTO = Buffer.from(
+  'bastion-chave-de-desenvolvimento!',
+  'utf8',
+).subarray(0, 32);
+
+const resolverChaveDeCifragem = (env: NodeJS.ProcessEnv, valor: string | undefined): Buffer => {
+  if (valor !== undefined && valor.trim() !== '') return lerChaveDeCifragem(valor);
+  if (env['NODE_ENV'] === 'production') {
+    throw new Error(
+      'CHAVE_DE_CIFRAGEM é obrigatória em produção (32 bytes em base64 ou hexadecimal). Defina uma chave própria e secreta.',
+    );
+  }
+  if (env['NODE_ENV'] !== 'test') {
+    process.emitWarning(
+      'CHAVE_DE_CIFRAGEM não definida: usando a chave FIXA de desenvolvimento. Não use em produção.',
+    );
+  }
+  return CHAVE_DE_CIFRAGEM_DE_DESENVOLVIMENTO;
+};
 
 export interface Config {
   databaseUrl: string;
@@ -36,6 +59,8 @@ export interface Config {
   sessaoCookieSeguro: boolean;
   sessaoDuracaoHoras: number;
   limiteDeTaxaAtivo: boolean;
+  /** Chave AES-256 (32 bytes) dos segredos em repouso. */
+  chaveDeCifragem: Buffer;
 }
 
 export const carregarConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
@@ -69,5 +94,6 @@ export const carregarConfig = (env: NodeJS.ProcessEnv = process.env): Config => 
     sessaoCookieSeguro: e.SESSAO_COOKIE_SEGURO,
     sessaoDuracaoHoras: e.SESSAO_DURACAO_HORAS,
     limiteDeTaxaAtivo: e.API_LIMITE_DE_TAXA,
+    chaveDeCifragem: resolverChaveDeCifragem(env, e.CHAVE_DE_CIFRAGEM),
   };
 };

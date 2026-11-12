@@ -23,6 +23,9 @@ const paraAgregado = (linha: LinhaDeSistema): Sistema =>
     },
     ultimaNota: linha.ultimaNota,
     criadoEm: linha.criadoEm,
+    credencialDeTeste: linha.credencialDeTeste,
+    conectorDeIa: linha.conectorDeIa,
+    permitirCriacaoDeDadosDeTeste: linha.permitirCriacaoDeDadosDeTeste,
   });
 
 export class RepositorioDeSistemas {
@@ -59,6 +62,11 @@ export class RepositorioDeSistemas {
         verificacaoExpiraEm: dados.verificacao.expiraEm,
         verificacaoMensagem: dados.verificacao.mensagem,
         ultimaNota: dados.ultimaNota,
+        credencialDeTeste: dados.credencialDeTeste ?? null,
+        conectorDeIa: dados.conectorDeIa
+          ? { ...dados.conectorDeIa, frasesSigilosas: [...dados.conectorDeIa.frasesSigilosas] }
+          : null,
+        permitirCriacaoDeDadosDeTeste: dados.permitirCriacaoDeDadosDeTeste ?? false,
       })
       .where(and(eq(sistemas.id, dados.id), eq(sistemas.organizacaoId, dados.organizacaoId)));
   }

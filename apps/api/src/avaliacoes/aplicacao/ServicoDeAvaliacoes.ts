@@ -8,7 +8,8 @@ import type {
   RespostaDeSolicitacao,
   TarefaExecutarAvaliacao,
 } from '@bastion/contratos';
-import { gerarIdentificador } from '@bastion/dominio-compartilhado';
+import { ErroDeDominio, gerarIdentificador } from '@bastion/dominio-compartilhado';
+import type { Cifragem } from '../../compartilhado/cifragem';
 import type { ServicoDeAchados } from '../../achados/aplicacao/ServicoDeAchados';
 import type { ServicoDeAuditoria } from '../../auditoria/aplicacao/ServicoDeAuditoria';
 import { decodificarCursor, montarPagina } from '../../auditoria/aplicacao/paginacao';
@@ -28,7 +29,13 @@ import type { ServicoDeSistemas } from '../../sistemas/aplicacao/ServicoDeSistem
 import { Agenda } from '../dominio/Agenda';
 import { Avaliacao } from '../dominio/Avaliacao';
 import { ehEstadoFinalDaAvaliacao } from '../dominio/EstadoDaAvaliacao';
-import { tempoMaximoDeExecucaoMs } from '../dominio/PerfilDeAvaliacao';
+import { AutorizacaoDeTeste } from '../dominio/AutorizacaoDeTeste';
+import {
+  caminhosExcluidosPadrao,
+  metodosDoPerfil,
+  tempoMaximoDeExecucaoMs,
+  tetoDeRequisicoes,
+} from '../dominio/PerfilDeAvaliacao';
 import type { AoVivo } from '../infraestrutura/ao-vivo';
 import { RepositorioDeAvaliacoes } from '../infraestrutura/RepositorioDeAvaliacoes';
 import { paraAvaliacaoDto } from './paraAvaliacaoDto';
@@ -58,6 +65,8 @@ interface DadosDaCriacao {
   notaMinima?: number;
   origem: OrigemDaAvaliacao;
   achadoRevalidadoId?: string;
+  autorizacao?: { responsavel: string; referencia: string } | undefined;
+  permitirCriacaoDeDados?: boolean;
 }
 
 export class ServicoDeAvaliacoes {
@@ -70,6 +79,7 @@ export class ServicoDeAvaliacoes {
     private readonly achados: ServicoDeAchados,
     private readonly relatorios: ServicoDeRelatorios,
     private readonly aoVivo: AoVivo,
+    private readonly cifragem: Cifragem,
     readonly repositorio = new RepositorioDeAvaliacoes(),
   ) {}
 
@@ -92,6 +102,8 @@ export class ServicoDeAvaliacoes {
       perfil: corpo.perfil,
       notaMinima: corpo.notaMinima,
       origem: origemDaSolicitacao(contexto, cabecalhoDeOrigem),
+      autorizacao: corpo.autorizacao,
+      permitirCriacaoDeDados: corpo.permitirCriacaoDeDados,
     });
   }
 
@@ -287,6 +299,8 @@ export class ServicoDeAvaliacoes {
           dados.notaMinima ??
           (await this.repositorio.notaMinimaDaUltimaAvaliacao(tx, sistema.id)) ??
           NOTA_MINIMA_PADRAO;
+        const permitirCriacaoDeDados = dados.perfil === 'COMPLETO' && dados.permitirCriacaoDeDados === true;
+        this.exigirPerfilAplicavel(sistema, dados.perfil, permitirCriacaoDeDados, agora);
         const nova = Avaliacao.solicitar(
           {
             id: gerarIdentificador(),
@@ -299,6 +313,10 @@ export class ServicoDeAvaliacoes {
             solicitadaPor: contexto.ator.nome,
             sistemaVerificado: sistema.estaVerificado(agora),
             achadoRevalidadoId: dados.achadoRevalidadoId ?? null,
+            ...(dados.autorizacao
+              ? { autorizacao: AutorizacaoDeTeste.criar(dados.autorizacao, agora) }
+              : {}),
+            permitirCriacaoDeDados,
           },
           agora,
         );
@@ -315,6 +333,9 @@ export class ServicoDeAvaliacoes {
             origem: dados.origem,
             estado: nova.estado,
             achadoRevalidadoId: dados.achadoRevalidadoId ?? null,
+            autorizadaPor: nova.autorizacao?.responsavel ?? null,
+            referenciaDaAutorizacao: nova.autorizacao?.referencia ?? null,
+            permitirCriacaoDeDados,
           },
         });
         await registrarNoOutbox(tx, nova.puxarEventos());
@@ -327,18 +348,98 @@ export class ServicoDeAvaliacoes {
     return { id: avaliacao.id, estado: avaliacao.estado };
   }
 
+  /**
+   * Monta a tarefa do worker. Os segredos (credencial de teste no COMPLETO, cabeçalhos do conector
+   * no IA) são decifrados aqui e seguem só na fila; nunca vão para log, auditoria ou DTO.
+   * COMPLETO sem credencial cadastrada roda sem autenticação.
+   */
   private montarTarefa(avaliacao: Avaliacao, sistema: Sistema): TarefaExecutarAvaliacao {
-    return {
+    const perfil = avaliacao.perfil;
+    const tarefa: TarefaExecutarAvaliacao = {
       avaliacaoId: avaliacao.id,
       organizacaoId: avaliacao.organizacaoId,
       sistemaId: sistema.id,
-      perfil: avaliacao.perfil,
+      perfil,
       urlDeHomologacao: sistema.urlDeHomologacao,
       escopo: {
         ...sistema.escopo().paraDados(),
-        tempoMaximoMs: tempoMaximoDeExecucaoMs(avaliacao.perfil),
+        tempoMaximoMs: tempoMaximoDeExecucaoMs(perfil),
+        metodosPermitidos: metodosDoPerfil(perfil),
+        caminhosExcluidos: caminhosExcluidosPadrao(),
+        tetoDeRequisicoes: tetoDeRequisicoes(perfil),
+        permitirCriacaoDeDados: perfil === 'COMPLETO' && avaliacao.permitirCriacaoDeDados,
       },
     };
+    try {
+      const credencial = sistema.credencialDeTeste;
+      if (perfil === 'COMPLETO' && credencial) {
+        tarefa.credencialDeTeste = {
+          modo: credencial.modo,
+          urlDeLogin: credencial.urlDeLogin,
+          campoUsuario: credencial.campoUsuario,
+          campoSenha: credencial.campoSenha,
+          usuario: this.cifragem.decifrar(credencial.segredoUsuarioCifrado),
+          senha: this.cifragem.decifrar(credencial.segredoSenhaCifrado),
+          indicadorDeSucesso: credencial.indicadorDeSucesso,
+        };
+      }
+      const conector = sistema.conectorDeIa;
+      if (perfil === 'IA' && conector) {
+        tarefa.conectorDeIa = {
+          url: conector.url,
+          ...(conector.cabecalhosCifrados === null
+            ? {}
+            : {
+                cabecalhos: JSON.parse(
+                  this.cifragem.decifrar(conector.cabecalhosCifrados),
+                ) as Record<string, string>,
+              }),
+          modeloDoCorpo: conector.modeloDoCorpo,
+          caminhoDaResposta: conector.caminhoDaResposta,
+          frasesSigilosas: [...conector.frasesSigilosas],
+        };
+      }
+    } catch {
+      throw new ErroDeDominio(
+        'Não foi possível ler os segredos do sistema; cadastre novamente a credencial ou o conector.',
+        'SEGREDO_ILEGIVEL',
+      );
+    }
+    return tarefa;
+  }
+
+  /** Perfis ativos dependem de configuração do sistema; devolve 422 com o motivo quando falta. */
+  private exigirPerfilAplicavel(
+    sistema: Sistema,
+    perfil: DadosDaCriacao['perfil'],
+    permitirCriacaoDeDados: boolean,
+    agora: Date,
+  ): void {
+    if (perfil === 'IA') {
+      if (sistema.tipo !== 'APP_COM_IA') {
+        throw new ErroDeDominio(
+          'O perfil IA só se aplica a sistemas do tipo app com IA.',
+          'PERFIL_INDISPONIVEL',
+        );
+      }
+      if (sistema.conectorDeIa === null) {
+        throw new ErroDeDominio(
+          'Configure o conector de IA antes de avaliar com o perfil IA.',
+          'PERFIL_INDISPONIVEL',
+        );
+      }
+    }
+    // A propriedade não verificada não bloqueia: a avaliação espera a verificação (AGUARDANDO_VERIFICACAO).
+    const aptidao = sistema.podeAvaliarComPerfil(perfil, agora);
+    if (!aptidao.ok && sistema.estaVerificado(agora)) {
+      throw new ErroDeDominio(aptidao.motivo ?? 'Perfil indisponível.', 'PERFIL_INDISPONIVEL');
+    }
+    if (perfil === 'COMPLETO' && permitirCriacaoDeDados && !sistema.permitirCriacaoDeDadosDeTeste) {
+      throw new ErroDeDominio(
+        'A criação de dados de teste exige o consentimento registrado no sistema.',
+        'CONSENTIMENTO_AUSENTE',
+      );
+    }
   }
 
   /**
