@@ -52,6 +52,14 @@ services:
       retries: 10
       start_period: 10s
 
+  # Caixa de entrada de DESENVOLVIMENTO: captura os e-mails (convites) e NÃO os entrega de verdade.
+  # Interface web em 8025; SMTP em 1025.
+  email:
+    image: axllent/mailpit:v1.33.1
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
   # Alvo propositalmente mal configurado: único alvo dos testes ponta a ponta.
   alvo-de-teste:
     build: ./infra/alvo-de-teste
