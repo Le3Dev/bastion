@@ -24,7 +24,7 @@ export interface DadosDoSistema {
   criadoEm: Date;
   credencialDeTeste?: DadosDaCredencialDeTeste | null;
   conectorDeIa?: DadosDoConectorDeIa | null;
-  permitirCriacaoDeDadosDeTeste?: boolean;
+  arquivadoEm?: Date | null;
 }
 
 /** Perfis de avaliação conhecidos pelo contexto de sistemas (sem depender do contexto de avaliações). */
@@ -46,7 +46,7 @@ export class Sistema {
   private eventos: EventoDeSistema[] = [];
   private _credencialDeTeste: CredencialDeTeste | null = null;
   private _conectorDeIa: ConectorDeIa | null = null;
-  private _permitirCriacaoDeDadosDeTeste = false;
+  private _arquivadoEm: Date | null = null;
 
   private constructor(
     readonly id: string,
@@ -123,7 +123,7 @@ export class Sistema {
       dados.conectorDeIa === undefined || dados.conectorDeIa === null
         ? null
         : ConectorDeIa.reconstituir(dados.conectorDeIa);
-    sistema._permitirCriacaoDeDadosDeTeste = dados.permitirCriacaoDeDadosDeTeste ?? false;
+    sistema._arquivadoEm = dados.arquivadoEm ?? null;
     return sistema;
   }
 
@@ -135,8 +135,22 @@ export class Sistema {
     return this._conectorDeIa;
   }
 
-  get permitirCriacaoDeDadosDeTeste(): boolean {
-    return this._permitirCriacaoDeDadosDeTeste;
+  get arquivadoEm(): Date | null {
+    return this._arquivadoEm;
+  }
+
+  get estaArquivado(): boolean {
+    return this._arquivadoEm !== null;
+  }
+
+  arquivar(agora: Date): void {
+    if (this._arquivadoEm !== null) {
+      throw new ErroDeDominio('Sistema já arquivado.', 'JA_ARQUIVADO');
+    }
+    this._arquivadoEm = agora;
+    this.eventos.push(
+      criarEvento('SistemaArquivado', this.organizacaoId, { sistemaId: this.id }, agora),
+    );
   }
 
   definirCredencialDeTeste(credencial: CredencialDeTeste): void {
@@ -155,12 +169,11 @@ export class Sistema {
     this._conectorDeIa = null;
   }
 
-  definirConsentimentoDeCriacaoDeDados(valor: boolean): void {
-    this._permitirCriacaoDeDadosDeTeste = valor;
-  }
-
   /** Verifica se o sistema pode ser avaliado com o perfil (propriedade verificada; IA exige conector). */
   podeAvaliarComPerfil(perfil: PerfilParaAvaliar, agora: Date): { ok: boolean; motivo?: string } {
+    if (this._arquivadoEm !== null) {
+      return { ok: false, motivo: 'Sistema arquivado.' };
+    }
     if (!this.estaVerificado(agora)) {
       return { ok: false, motivo: 'A propriedade do sistema precisa estar verificada.' };
     }
@@ -241,7 +254,7 @@ export class Sistema {
       criadoEm: this.criadoEm,
       credencialDeTeste: this._credencialDeTeste === null ? null : this._credencialDeTeste.paraDados(),
       conectorDeIa: this._conectorDeIa === null ? null : this._conectorDeIa.paraDados(),
-      permitirCriacaoDeDadosDeTeste: this._permitirCriacaoDeDadosDeTeste,
+      arquivadoEm: this._arquivadoEm,
     };
   }
 

@@ -3,7 +3,7 @@ import { organizacoes } from '../../contas/infraestrutura/tabelas'
 import { sistemas } from '../../sistemas/infraestrutura/tabelas'
 
 type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA'
-type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI'
+type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI' | 'AGENDA'
 type EstadoDaAvaliacao =
   | 'RASCUNHO'
   | 'AGUARDANDO_VERIFICACAO'

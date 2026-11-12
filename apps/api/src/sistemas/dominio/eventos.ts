@@ -16,4 +16,10 @@ export type VerificacaoDeSistemaFalhou = EventoDeDominio<
   { sistemaId: string; metodo: MetodoDeVerificacao; mensagem: string }
 >;
 
-export type EventoDeSistema = SistemaCadastrado | SistemaVerificado | VerificacaoDeSistemaFalhou;
+export type SistemaArquivado = EventoDeDominio<'SistemaArquivado', { sistemaId: string }>;
+
+export type EventoDeSistema =
+  | SistemaCadastrado
+  | SistemaVerificado
+  | VerificacaoDeSistemaFalhou
+  | SistemaArquivado;

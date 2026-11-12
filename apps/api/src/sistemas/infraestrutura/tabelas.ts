@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { organizacoes } from '../../contas/infraestrutura/tabelas'
 
 type CredencialDeTesteSalva = {
@@ -41,7 +41,7 @@ export const sistemas = pgTable(
     ultimaNota: integer('ultima_nota'),
     credencialDeTeste: jsonb('credencial_de_teste').$type<CredencialDeTesteSalva>(),
     conectorDeIa: jsonb('conector_de_ia').$type<ConectorDeIaSalvo>(),
-    permitirCriacaoDeDadosDeTeste: boolean('permitir_criacao_de_dados_de_teste').notNull().default(false),
+    arquivadoEm: timestamp('arquivado_em', { withTimezone: true }),
     criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('sistemas_organizacao_idx').on(t.organizacaoId, t.criadoEm.desc())],

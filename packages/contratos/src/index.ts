@@ -2,6 +2,7 @@ export * from './comum';
 export * from './api/contas';
 export * from './api/sistemas';
 export * from './api/avaliacoes';
+export * from './api/agendamentos';
 export * from './api/achados';
 export * from './api/relatorios';
 export * from './api/auditoria';
