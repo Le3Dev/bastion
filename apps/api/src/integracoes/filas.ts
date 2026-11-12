@@ -9,6 +9,11 @@ import {
 import { Queue, QueueEvents } from 'bullmq';
 import { Redis } from 'ioredis';
 import { z } from 'zod';
+import {
+  FUSO_DOS_AGENDAMENTOS,
+  montarCron,
+  type RecorrenciaDoAgendamento,
+} from './cron-de-agendamento';
 
 /** A fila não devolveu o resultado dentro do prazo (o worker pode estar parado). */
 export class ErroDeTempoEsgotadoDaFila extends Error {
@@ -38,6 +43,19 @@ export const TarefaDeVigilanciaEsquema = z.discriminatedUnion('tipo', [
   }),
 ]) satisfies z.ZodType<TarefaDeVigilancia>;
 
+/** Fila interna, processada pela própria API: dispara os agendamentos recorrentes de avaliação. */
+export const FILA_DE_AGENDAMENTOS = 'agendamentos';
+
+export interface AgendamentoParaFila extends RecorrenciaDoAgendamento {
+  id: string;
+  organizacaoId: string;
+}
+
+export const TarefaDeAgendamentoEsquema = z.object({
+  agendamentoId: z.string(),
+  organizacaoId: z.string(),
+});
+
 /** Id determinístico: repetir o mesmo agendamento (mesma tarefa e atraso) não duplica o job. */
 export const idDaVigilancia = (tarefa: TarefaDeVigilancia, atrasoMs: number): string => {
   const alvo = tarefa.tipo === 'tempo-limite-da-avaliacao' ? tarefa.avaliacaoId : tarefa.achadoId;
@@ -51,6 +69,11 @@ export interface Filas {
   enfileirarEntregaDeWebhook(tarefa: TarefaEntregarWebhook): Promise<void>;
   /** Agenda uma verificação de prazo para daqui a `atrasoMs` (fila `vigilancia`, tratada pela API). */
   agendarVigilancia(tarefa: TarefaDeVigilancia, atrasoMs: number): Promise<void>;
+  /** Cria ou atualiza o agendador recorrente (um por agendamento, id = id do agendamento). */
+  registrarAgendamento(agendamento: AgendamentoParaFila): Promise<void>;
+  removerAgendamento(agendamentoId: string): Promise<void>;
+  /** Próxima execução prevista pelo agendador (ISO), ou null se não houver. */
+  proximaExecucaoDoAgendamento(agendamentoId: string): Promise<string | null>;
   /** Grava o sinal de cancelamento no Redis (TTL de 1 hora); o worker o consulta entre requisições. */
   sinalizarCancelamento(avaliacaoId: string): Promise<void>;
   /** Falha se o Redis não responder. */
@@ -72,12 +95,13 @@ export const criarFilas = (redisUrl: string): Filas => {
   const filaDeAvaliacoes = new Queue(FILAS.avaliacoes, { connection: conexao });
   const filaDeWebhooks = new Queue(FILAS.webhooks, { connection: conexao });
   const filaDeVigilancia = new Queue(FILA_DE_VIGILANCIA, { connection: conexao });
+  const filaDeAgendamentos = new Queue(FILA_DE_AGENDAMENTOS, { connection: conexao });
   const eventosDeVerificacoes = new QueueEvents(FILAS.verificacoes, { connection: conexao });
   const redis = new Redis(redisUrl, { lazyConnect: false, maxRetriesPerRequest: 2 });
   redis.on('error', () => {
     // Os erros aparecem nas chamadas (saúde, cancelamento); evita "unhandled error event".
   });
-  for (const fila of [filaDeVerificacoes, filaDeAvaliacoes, filaDeWebhooks, filaDeVigilancia]) {
+  for (const fila of [filaDeVerificacoes, filaDeAvaliacoes, filaDeWebhooks, filaDeVigilancia, filaDeAgendamentos]) {
     fila.on('error', () => undefined);
   }
   eventosDeVerificacoes.on('error', () => undefined);
@@ -131,6 +155,27 @@ export const criarFilas = (redisUrl: string): Filas => {
         removeOnComplete: true,
         removeOnFail: 100,
       });
+    },
+
+    async registrarAgendamento(agendamento) {
+      await filaDeAgendamentos.upsertJobScheduler(
+        agendamento.id,
+        { pattern: montarCron(agendamento), tz: FUSO_DOS_AGENDAMENTOS },
+        {
+          name: 'disparar',
+          data: { agendamentoId: agendamento.id, organizacaoId: agendamento.organizacaoId },
+          opts: { removeOnComplete: true, removeOnFail: 100 },
+        },
+      );
+    },
+
+    async removerAgendamento(agendamentoId) {
+      await filaDeAgendamentos.removeJobScheduler(agendamentoId);
+    },
+
+    async proximaExecucaoDoAgendamento(agendamentoId) {
+      const agendador = await filaDeAgendamentos.getJobScheduler(agendamentoId);
+      return agendador?.next === undefined ? null : new Date(agendador.next).toISOString();
     },
 
     async sinalizarCancelamento(avaliacaoId) {

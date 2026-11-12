@@ -15,7 +15,8 @@ import type {
   OuvinteAoVivo,
 } from '../../avaliacoes/infraestrutura/ao-vivo';
 import type { Armazenamento } from '../../integracoes/armazenamento';
-import type { Filas, TarefaDeVigilancia } from '../../integracoes/filas';
+import { criarServicoDeEmailFalso, type ServicoDeEmailFalso } from '../email/email';
+import type { AgendamentoParaFila, Filas, TarefaDeVigilancia } from '../../integracoes/filas';
 import { criarConexao, type Banco } from '../banco/conexao';
 import type { Config } from '../config';
 import { relogioDoSistema } from '../relogio';
@@ -36,6 +37,8 @@ export class FilasFalsas implements Filas {
   entregas: TarefaEntregarWebhook[] = [];
   cancelamentos: string[] = [];
   vigilancias: { tarefa: TarefaDeVigilancia; atrasoMs: number }[] = [];
+  /** Agendadores recorrentes registrados (por id do agendamento). */
+  agendamentos = new Map<string, AgendamentoParaFila>();
   /** Quando preenchido, `enfileirarAvaliacao` falha com este erro (simula a fila fora do ar). */
   erroAoEnfileirarAvaliacao: Error | null = null;
 
@@ -53,6 +56,15 @@ export class FilasFalsas implements Filas {
   }
   async agendarVigilancia(tarefa: TarefaDeVigilancia, atrasoMs: number): Promise<void> {
     this.vigilancias.push({ tarefa, atrasoMs });
+  }
+  async registrarAgendamento(agendamento: AgendamentoParaFila): Promise<void> {
+    this.agendamentos.set(agendamento.id, agendamento);
+  }
+  async removerAgendamento(agendamentoId: string): Promise<void> {
+    this.agendamentos.delete(agendamentoId);
+  }
+  async proximaExecucaoDoAgendamento(agendamentoId: string): Promise<string | null> {
+    return this.agendamentos.has(agendamentoId) ? new Date(Date.now() + 3_600_000).toISOString() : null;
   }
   async sinalizarCancelamento(avaliacaoId: string): Promise<void> {
     this.cancelamentos.push(avaliacaoId);
@@ -108,6 +120,7 @@ export interface AmbienteDeTeste {
   filas: FilasFalsas;
   armazenamento: ArmazenamentoEmMemoria;
   aoVivo: AoVivoEmMemoria;
+  email: ServicoDeEmailFalso;
   /** Esvazia todas as tabelas (conexão do migrador, dono das tabelas). */
   limpar(): Promise<void>;
   encerrar(): Promise<void>;
@@ -140,12 +153,14 @@ export const criarAmbienteDeTeste = async (): Promise<AmbienteDeTeste> => {
     sessaoDuracaoHoras: 12,
     limiteDeTaxaAtivo: false,
     chaveDeCifragem: Buffer.alloc(32, 7),
+    email: null,
   };
   const conexao = criarConexao(urlDoApp);
   const migrador = new pg.Pool({ connectionString: urlDoMigrador, max: 2 });
   const filas = new FilasFalsas();
   const armazenamento = new ArmazenamentoEmMemoria();
   const aoVivo = new AoVivoEmMemoria();
+  const email = criarServicoDeEmailFalso();
   const app = await criarAplicacao({
     config,
     db: conexao.db,
@@ -153,6 +168,7 @@ export const criarAmbienteDeTeste = async (): Promise<AmbienteDeTeste> => {
     relogio: relogioDoSistema,
     armazenamento,
     aoVivo,
+    email,
   });
   await app.ready();
 
@@ -162,6 +178,7 @@ export const criarAmbienteDeTeste = async (): Promise<AmbienteDeTeste> => {
     filas,
     armazenamento,
     aoVivo,
+    email,
     limpar: async () => {
       await migrador.query(
         'TRUNCATE organizacoes, usuarios, sessoes, chaves_de_api, eventos_de_saida, eventos_processados CASCADE',

@@ -2,6 +2,7 @@ import type { AoVivo } from '../avaliacoes/infraestrutura/ao-vivo';
 import type { Armazenamento } from '../integracoes/armazenamento';
 import type { Filas } from '../integracoes/filas';
 import type { Banco } from './banco/conexao';
+import type { ServicoDeEmail } from './email/email';
 import type { Config } from './config';
 import type { Relogio } from './relogio';
 
@@ -15,4 +16,6 @@ export interface Dependencias {
   armazenamento: Armazenamento;
   /** Pub/sub do acompanhamento ao vivo (SSE) das avaliações. */
   aoVivo: AoVivo;
+  /** Envio de e-mail (convites); sem SMTP configurado vira no-op. */
+  email: ServicoDeEmail;
 }

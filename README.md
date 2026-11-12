@@ -360,7 +360,7 @@ Listas paginadas devolvem `{ "itens": [...], "proximaPagina": "<cursor>" | null 
 
 | Rota | Permissão | Descrição | Resposta |
 |---|---|---|---|
-| `GET /v1/sistemas` | `LER` | Lista sistemas | `{ itens: SistemaDto[] }` |
+| `GET /v1/sistemas` | `LER` | Lista sistemas (esconde os arquivados; `?incluirArquivados=true` os mostra) | `{ itens: SistemaDto[] }` |
 | `POST /v1/sistemas` | `CADASTRAR_SISTEMA` | Cadastra (`nome`, `tipo`, `urlDeHomologacao`, `dominioDeProducao`, `metodoDeVerificacao`) | `201 { id, estadoVerificacao, verificacao }` |
 | `GET /v1/sistemas/{id}` | `LER` | Detalhe, com estado da verificação e última nota | `200 SistemaDto` |
 | `GET /v1/sistemas/{id}/verificacao` | `LER` | Token e instruções dos três métodos | `200 { metodo, token, registroDns, arquivo, cabecalho }` |
@@ -369,19 +369,29 @@ Listas paginadas devolvem `{ "itens": [...], "proximaPagina": "<cursor>" | null 
 | `DELETE /v1/sistemas/{id}/credencial-de-teste` | `CADASTRAR_SISTEMA` | Remove a credencial | `200 SistemaDto` |
 | `PUT /v1/sistemas/{id}/conector-de-ia` | `CADASTRAR_SISTEMA` | Configura como falar com o app de IA (`url` https, `cabecalhos?`, `modeloDoCorpo` com `{{mensagem}}`, `caminhoDaResposta`, `frasesSigilosas[]`). Só para `tipo` `APP_COM_IA` (senão 422). Cabeçalhos são cifrados | `200 SistemaDto` (só `conectorDeIa { configurado, url, caminhoDaResposta }`) |
 | `DELETE /v1/sistemas/{id}/conector-de-ia` | `CADASTRAR_SISTEMA` | Remove o conector | `200 SistemaDto` |
-| `PATCH /v1/sistemas/{id}/consentimento-de-dados` | `CADASTRAR_SISTEMA` | Registra o consentimento para criar dados de teste (`{ permitir: boolean }`) | `200 SistemaDto` (`permitirCriacaoDeDadosDeTeste`) |
+| `POST /v1/sistemas/{id}/arquivar` | `CADASTRAR_SISTEMA` | Arquiva o sistema: some da listagem padrão, deixa de contar no limite do plano, não pode mais ser avaliado (422 `SISTEMA_ARQUIVADO`) e seus agendamentos são pausados | `200 SistemaDto` (`arquivado: true`) |
+| `PATCH /v1/sistemas/{id}/metodo` | `VERIFICAR_SISTEMA` | Troca o método de verificação (`{ metodo }`): gera novo token e a verificação volta a `PENDENTE` | `200 { metodo, token, registroDns, arquivo, cabecalho }` |
 
 **Avaliações**
 
 | Rota | Permissão | Descrição | Resposta |
 |---|---|---|---|
 | `GET /v1/avaliacoes` | `LER` | Lista (`?sistemaId`, `?estado`, paginação) | página de `AvaliacaoDto` |
-| `POST /v1/avaliacoes` | `SOLICITAR_AVALIACAO` | Dispara (`sistemaId`, `perfil` `PASSIVO\|PADRAO\|COMPLETO\|IA`, `notaMinima`, `autorizacao { responsavel, referencia }`, `permitirCriacaoDeDados`). Perfis ativos sem `autorizacao` dão 422 `AUTORIZACAO_OBRIGATORIA`; `IA` sem conector ou fora de `APP_COM_IA` dá 422 `PERFIL_INDISPONIVEL`; `permitirCriacaoDeDados` só vale no `COMPLETO` e exige o consentimento do sistema (422 `CONSENTIMENTO_AUSENTE`) | `202 { id, estado }` |
+| `POST /v1/avaliacoes` | `SOLICITAR_AVALIACAO` | Dispara (`sistemaId`, `perfil` `PASSIVO\|PADRAO\|COMPLETO\|IA`, `notaMinima`, `autorizacao { responsavel, referencia }`, `permitirCriacaoDeDados`). Perfis ativos sem `autorizacao` dão 422 `AUTORIZACAO_OBRIGATORIA`; `IA` sem conector ou fora de `APP_COM_IA` dá 422 `PERFIL_INDISPONIVEL`; `permitirCriacaoDeDados` só vale no `COMPLETO`. Sistema arquivado dá 422 `SISTEMA_ARQUIVADO`; acima de 100 avaliações no mês, 422 `LIMITE_DO_PLANO`. A `origem` é `AGENDA` quando a avaliação nasce de um agendamento | `202 { id, estado }` |
 | `GET /v1/avaliacoes/{id}` | `LER` | Estado, progresso, etapas, nota, `aprovada`, `relatorioId` e contagem de achados | `200 AvaliacaoDto` |
 | `GET /v1/avaliacoes/{id}/requisicoes` | `LER` | Requisições do Guardião, com decisão e motivo | `{ itens: RequisicaoDoGuardiaoDto[] }` |
 | `POST /v1/avaliacoes/{id}/parar` | `PARAR_AVALIACAO` | Cancela | `200 { estado: "CANCELADA" }` |
 | `GET /v1/avaliacoes/{id}/eventos` | `LER` | Stream SSE (seção 6.4) | `text/event-stream` |
 | `GET /v1/avaliacoes/{id}/achados` | `LER` | Achados da avaliação (`?severidade=CRITICA,ALTA`, paginação) | página de `AchadoResumoDto` |
+
+**Agendamentos**
+
+| Rota | Permissão | Descrição | Resposta |
+|---|---|---|---|
+| `GET /v1/agendamentos` | `LER` | Lista os agendamentos recorrentes, com `sistemaNome`, `autorizacao` e `proximaExecucaoEm` | `{ itens: AgendamentoDto[] }` |
+| `POST /v1/agendamentos` | `SOLICITAR_AVALIACAO` | Cria (`sistemaId`, `perfil`, `notaMinima`, `frequencia` `DIARIA\|SEMANAL\|MENSAL`, `horario` `HH:MM`, `diaDaSemana` 0-6 se semanal, `diaDoMes` 1-28 se mensal, `autorizacao` obrigatória em perfil ativo, `permitirCriacaoDeDados`). O sistema precisa estar verificado e não arquivado (422 `SISTEMA_NAO_VERIFICADO` / `SISTEMA_ARQUIVADO`). Horário no fuso `America/Sao_Paulo` | `201 AgendamentoDto` |
+| `PATCH /v1/agendamentos/{id}` | `SOLICITAR_AVALIACAO` | Pausa ou retoma (`{ ativo }`) | `200 AgendamentoDto` |
+| `DELETE /v1/agendamentos/{id}` | `SOLICITAR_AVALIACAO` | Remove o agendamento e o agendador | `204` |
 
 **Achados**
 
@@ -507,7 +517,7 @@ Guia para quem opera a plataforma no dia a dia. Para subir o ambiente local, vej
 
 - **Organização nova:** em `/login`, escolha criar conta e informe nome da organização, seu nome, e-mail e senha (mínimo de 12 caracteres). Quem cria a organização vira **DONO**.
 - **Organização que já existe:** entre com e-mail e senha. No ambiente de desenvolvimento semeado (`pnpm banco:semear`), use `dono@exemplo.com.br` e `bastion-demo-123` (os outros papéis estão na seção 2).
-- **Convite:** quem recebeu um convite abre a tela de aceite com o token, informa nome e senha e entra já com o papel definido. O e-mail do convite ainda não é enviado: quem convida repassa o token.
+- **Convite:** quem recebeu um convite abre a tela de aceite com o token, informa nome e senha e entra já com o papel definido. O convite também é enviado por **e-mail** com o link de aceite (em desenvolvimento, o Mailpit captura as mensagens em http://localhost:8025; sem SMTP configurado o envio é pulado). A falha no envio nunca derruba o convite: o token continua sendo devolvido para repassar manualmente.
 
 ### 8.2 Cadastrar um sistema
 
@@ -528,16 +538,26 @@ Só sistemas com a propriedade comprovada podem ser avaliados. A tela mostra o t
 
 A conferência é feita pelo worker e a tela espera o resultado por até 20 s (ADR 14). Se passar do prazo, confira se o worker está rodando e tente de novo. A verificação vale 90 dias.
 
+**Trocar o método:** escolha outro método na tela do sistema (`PATCH /v1/sistemas/{id}/metodo`). O Bastion gera um novo token e a verificação volta a **pendente**: publique a nova prova e verifique de novo.
+
+**Arquivar um sistema:** use **Arquivar** na tela do sistema. Ele some da lista (use "incluir arquivados" para vê-lo), deixa de contar no limite do plano, não pode mais ser avaliado e seus agendamentos são pausados.
+
 ### 8.4 Disparar uma avaliação e acompanhar ao vivo
 
 1. Em **Avaliações → Nova avaliação**, escolha um sistema verificado, o perfil (**Passivo**, **Padrão**, **Completo** ou **IA**) e a **nota mínima** (0 a 100, padrão 70).
    - Escolher um perfil **ativo** (Padrão, Completo, IA) exige **autorização por escrito**: informe o **responsável** e a **referência do escopo** autorizado. Ela fica registrada na avaliação e na auditoria.
    - **Completo** usa a **credencial de teste** cadastrada no sistema (login por formulário; ela é cifrada e nunca é exibida de volta). Sem credencial, roda sem autenticação.
    - **IA** exige um **conector configurado** num sistema do tipo **App com IA** (URL, modelo do corpo com `{{mensagem}}`, caminho da resposta).
-   - **Criar dados** de teste só acontece no Completo, com o **consentimento** registrado no sistema e marcado na solicitação.
+   - **Criar dados** de teste só acontece no Completo, com o **consentimento** marcado na própria solicitação.
 2. A avaliação entra na fila e a tela mostra, ao vivo, as etapas, o progresso, as **requisições do Guardião** (permitidas e bloqueadas, com o motivo) e os achados à medida que aparecem.
 3. O botão **Parar** cancela a avaliação a qualquer momento (a permissão é `PARAR_AVALIACAO`).
 4. Ao terminar, a avaliação mostra a nota, se foi **aprovada** (nota ≥ nota mínima) e o link do relatório.
+
+#### Agendamento recorrente
+
+Em **Agendamentos** (`/agendamentos`), crie uma execução recorrente para um sistema **verificado**: escolha o perfil, a nota mínima, a frequência (**diária**, **semanal** com o dia da semana ou **mensal** com o dia 1 a 28) e o horário (fuso de São Paulo). Perfis ativos exigem a autorização por escrito, como na avaliação manual. Cada disparo cria uma avaliação com origem **Agenda**. É possível **pausar**, **retomar** e **remover**; a tela mostra a próxima execução.
+
+**Limites do plano (Profissional):** 10 sistemas ativos, 100 avaliações por mês e 10 membros. Passar do limite devolve 422 `LIMITE_DO_PLANO`. Um agendamento cujo disparo estoura o limite mensal é **pulado e auditado** (`AGENDAMENTO_PULADO_POR_LIMITE`), sem criar avaliação.
 
 ### 8.5 Tratar os achados
 

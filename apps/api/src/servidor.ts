@@ -6,6 +6,8 @@ import { carregarConfig } from './compartilhado/config';
 import { PublicadorDoOutbox } from './compartilhado/outbox/outbox';
 import { relogioDoSistema } from './compartilhado/relogio';
 import { criarArmazenamento } from './integracoes/armazenamento';
+import { iniciarProcessadorDeAgendamentos } from './integracoes/agendador';
+import { criarServicoDeEmail } from './compartilhado/email/email';
 import { iniciarConsumidorDeResultados } from './integracoes/consumidor-de-resultados';
 import { criarFilas } from './integracoes/filas';
 import { iniciarProcessadorDeVigilancia } from './integracoes/vigilancia';
@@ -61,6 +63,7 @@ async function principal(): Promise<void> {
     relogio: relogioDoSistema,
     armazenamento,
     aoVivo,
+    email: criarServicoDeEmail(config.email),
   });
   const publicador = new PublicadorDoOutbox(conexao.db, relogioDoSistema, (mensagem, erro) =>
     app.log.error({ err: erro }, mensagem),
@@ -79,6 +82,14 @@ async function principal(): Promise<void> {
     config.redisUrl,
     (mensagem, erro) => app.log.error({ err: erro }, mensagem),
   );
+  const agendador = iniciarProcessadorDeAgendamentos(
+    {
+      dispararAgendamento: (organizacaoId, agendamentoId) =>
+        app.servicos.agendamentos.disparar(organizacaoId, agendamentoId),
+    },
+    config.redisUrl,
+    (mensagem, erro) => app.log.error({ err: erro }, mensagem),
+  );
 
   let encerrando = false;
   const encerrar = async (sinal: string): Promise<void> => {
@@ -89,6 +100,7 @@ async function principal(): Promise<void> {
       await publicador.parar();
       await consumidor.fechar();
       await vigilancia.fechar();
+      await agendador.fechar();
       await app.close();
       await aoVivo.fechar();
       await filas.fechar();

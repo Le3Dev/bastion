@@ -9,9 +9,10 @@ import type {
   TarefaExecutarAvaliacao,
 } from '@bastion/contratos';
 import { ErroDeDominio, gerarIdentificador } from '@bastion/dominio-compartilhado';
+import { PoliticaDeLimitesDoPlano } from '../../contas/dominio/PoliticaDeLimitesDoPlano';
 import type { Cifragem } from '../../compartilhado/cifragem';
 import type { ServicoDeAchados } from '../../achados/aplicacao/ServicoDeAchados';
-import type { ServicoDeAuditoria } from '../../auditoria/aplicacao/ServicoDeAuditoria';
+import type { EntradaDeAuditoria, ServicoDeAuditoria } from '../../auditoria/aplicacao/ServicoDeAuditoria';
 import { decodificarCursor, montarPagina } from '../../auditoria/aplicacao/paginacao';
 import type { ContextoDaRequisicao } from '../../compartilhado/autenticacao/contexto';
 import { emContextoDaOrganizacao, type Banco, type Transacao } from '../../compartilhado/banco/conexao';
@@ -57,6 +58,18 @@ export const origemDaSolicitacao = (
   if (contexto.ator.tipo !== 'CHAVE_DE_API') return 'WEB';
   return cabecalhoDeOrigem?.trim().toUpperCase() === 'CI' ? 'CI' : 'API';
 };
+
+/** Quem pede e para qual organização: um usuário/chave de API ou o próprio Bastion (agenda). */
+interface SolicitanteDaAvaliacao {
+  organizacaoId: string;
+  ator: EntradaDeAuditoria['ator'];
+}
+
+/** Intervalo [início, fim) do mês corrente em UTC (mesma janela do plano). */
+export const janelaDoMes = (agora: Date): { inicio: Date; fim: Date } => ({
+  inicio: new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), 1)),
+  fim: new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth() + 1, 1)),
+});
 
 interface DadosDaCriacao {
   sistemaId: string;
@@ -105,6 +118,36 @@ export class ServicoDeAvaliacoes {
       autorizacao: corpo.autorizacao,
       permitirCriacaoDeDados: corpo.permitirCriacaoDeDados,
     });
+  }
+
+  /** Quantas avaliações a organização já solicitou no mês corrente (limite do plano). */
+  async contarDoMes(tx: Transacao, organizacaoId: string): Promise<number> {
+    const { inicio, fim } = janelaDoMes(this.relogio.agora());
+    return this.repositorio.contarSolicitadasNoPeriodo(tx, organizacaoId, inicio, fim);
+  }
+
+  /** Usado pelo agendador: cria a avaliação com origem AGENDA, em nome do Bastion. */
+  async solicitarPorAgenda(
+    organizacaoId: string,
+    entrada: {
+      sistemaId: string;
+      perfil: CorpoDeSolicitacaoDeAvaliacao['perfil'];
+      notaMinima: number;
+      autorizacao: { responsavel: string; referencia: string } | null;
+      permitirCriacaoDeDados: boolean;
+    },
+  ): Promise<{ id: string; estado: RespostaDeSolicitacao['estado'] }> {
+    return this.criar(
+      { organizacaoId, ator: ATOR_SISTEMA },
+      {
+        sistemaId: entrada.sistemaId,
+        perfil: entrada.perfil,
+        notaMinima: entrada.notaMinima,
+        origem: 'AGENDA',
+        autorizacao: entrada.autorizacao ?? undefined,
+        permitirCriacaoDeDados: entrada.permitirCriacaoDeDados,
+      },
+    );
   }
 
   /** Usado pelos achados: revalida um achado com uma avaliação PASSIVA do sistema dele. */
@@ -286,7 +329,7 @@ export class ServicoDeAvaliacoes {
   // --- Internos ------------------------------------------------------------------------------
 
   private async criar(
-    contexto: ContextoDaRequisicao,
+    contexto: SolicitanteDaAvaliacao,
     dados: DadosDaCriacao,
   ): Promise<{ id: string; estado: RespostaDeSolicitacao['estado'] }> {
     const agora = this.relogio.agora();
@@ -295,6 +338,9 @@ export class ServicoDeAvaliacoes {
       contexto.organizacaoId,
       async (tx) => {
         const sistema = await this.sistemas.obterParaAvaliacao(tx, dados.sistemaId);
+        PoliticaDeLimitesDoPlano.exigirPodeSolicitarAvaliacao(
+          await this.contarDoMes(tx, contexto.organizacaoId),
+        );
         const notaMinima =
           dados.notaMinima ??
           (await this.repositorio.notaMinimaDaUltimaAvaliacao(tx, sistema.id)) ??
@@ -414,6 +460,9 @@ export class ServicoDeAvaliacoes {
     perfil: DadosDaCriacao['perfil'],
     agora: Date,
   ): void {
+    if (sistema.estaArquivado) {
+      throw new ErroDeDominio('Este sistema está arquivado e não pode ser avaliado.', 'SISTEMA_ARQUIVADO');
+    }
     if (perfil === 'IA') {
       if (sistema.tipo !== 'APP_COM_IA') {
         throw new ErroDeDominio(
