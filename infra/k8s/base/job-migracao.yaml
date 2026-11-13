@@ -1,0 +1,48 @@
+# Job de migracao do banco. Deve concluir ANTES do rollout da API:
+#   kubectl apply -k infra/k8s/overlays/<ambiente>   (ou so o Job)
+#   kubectl -n bastion wait --for=condition=complete job/bastion-migracao --timeout=300s
+# Para reexecutar: kubectl -n bastion delete job bastion-migracao e aplicar de novo
+# (ou use como hook de pre-deploy no seu CD/Argo CD PreSync).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bastion-migracao
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bastion-migracao
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migracao
+          image: ghcr.io/le3dev/bastion-api
+          # Ajuste o caminho se a imagem da API usar outro WORKDIR/layout.
+          command: ["node", "apps/api/dist/migrar.js"]
+          envFrom:
+            - secretRef:
+                name: bastion-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

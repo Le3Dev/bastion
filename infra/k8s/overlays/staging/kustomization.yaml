@@ -1,0 +1,59 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: bastion-staging
+
+resources:
+  - ../../base
+
+images:
+  - name: ghcr.io/le3dev/bastion-web
+    newTag: latest
+  - name: ghcr.io/le3dev/bastion-api
+    newTag: latest
+  - name: ghcr.io/le3dev/bastion-worker
+    newTag: latest
+
+patches:
+  - target: { kind: Deployment, name: web }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: Deployment, name: api }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: Deployment, name: worker }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: Ingress, name: bastion }
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: app.staging.exemplo.com.br
+      - op: replace
+        path: /spec/tls/0/hosts/1
+        value: api.staging.exemplo.com.br
+      - op: replace
+        path: /spec/rules/0/host
+        value: app.staging.exemplo.com.br
+      - op: replace
+        path: /spec/rules/1/host
+        value: api.staging.exemplo.com.br
+  - target: { kind: NetworkPolicy, name: worker-redis }
+    patch: |-
+      - op: replace
+        path: /spec/egress/0/to/0/ipBlock/cidr
+        value: 203.0.113.20/32
+
+configMapGenerator:
+  - name: bastion-config
+    behavior: merge
+    literals:
+      - API_ORIGEM_WEB=https://app.staging.exemplo.com.br
+      - GUARDIAO_PERMITIR_REDES_PRIVADAS=false
+      - SESSAO_COOKIE_SEGURO=true

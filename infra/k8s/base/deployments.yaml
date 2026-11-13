@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bastion-web
+        bastion/plano: controle
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/le3dev/bastion-web
+          ports:
+            - name: http
+              containerPort: 3000
+          # NEXT_PUBLIC_API_URL e resolvida no build da imagem, nao aqui.
+          readinessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /login, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/apps/web/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bastion-api
+        bastion/plano: controle
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/le3dev/bastion-api
+          ports:
+            - name: http
+              containerPort: 3333
+          envFrom:
+            - configMapRef:
+                name: bastion-config
+            - secretRef:
+                name: bastion-secrets
+          readinessProbe:
+            httpGet: { path: /saude, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /saude, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Chromium (PDF do relatorio) grava perfil e cache em /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bastion-worker
+        bastion/plano: execucao
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/le3dev/bastion-worker
+          ports:
+            - name: saude
+              containerPort: 3334
+          envFrom:
+            - configMapRef:
+                name: bastion-config
+          env:
+            # O worker so recebe REDIS_URL: sem banco, S3, SMTP nem chave de cifragem.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bastion-secrets
+                  key: REDIS_URL
+          readinessProbe:
+            httpGet: { path: /saude, port: saude }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /saude, port: saude }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
