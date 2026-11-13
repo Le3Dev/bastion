@@ -1,0 +1,22 @@
+# Contexto de build enxuto: dependencias e artefatos sao gerados dentro da imagem.
+**/node_modules
+**/.next
+**/dist
+**/out
+**/coverage
+**/playwright-report
+**/test-results
+**/*.log
+**/*.tsbuildinfo
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+*.md
+!README.md
+docker-compose.yml
+infra/alvo-de-teste
+infra/postgres
+# NAO ignorar: apps/api/migracoes, pnpm-lock.yaml, pnpm-workspace.yaml

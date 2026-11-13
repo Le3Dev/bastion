@@ -1,0 +1,56 @@
+name: Imagens
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRO: ghcr.io/le3dev
+
+jobs:
+  imagens:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: bastion-web
+            dockerfile: infra/docker/Dockerfile.web
+          - nome: bastion-api
+            dockerfile: infra/docker/Dockerfile.api
+          - nome: bastion-worker
+            dockerfile: infra/docker/Dockerfile.worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRO }}/${{ matrix.nome }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Usado so pelo web (NEXT_PUBLIC_API_URL e embutido no build). Defina a
+          # variable de repositorio NEXT_PUBLIC_API_URL; sem ela vale o default do Dockerfile.
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3333' }}
+          cache-from: type=gha,scope=${{ matrix.nome }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.nome }}

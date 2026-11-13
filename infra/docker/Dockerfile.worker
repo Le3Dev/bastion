@@ -1,0 +1,23 @@
+# Imagem de producao do worker (BullMQ). Sem Chromium e sem acesso direto a banco.
+# Empacotamento: `pnpm deploy --prod` gera uma pasta autossuficiente (node_modules de
+# producao + pacotes do workspace); o `dist` compilado e copiado a parte porque o
+# deploy respeita .gitignore/files. Base node:24-slim (glibc).
+FROM node:24-slim AS construtor
+ENV CI=true
+RUN corepack enable
+WORKDIR /repo
+COPY . .
+RUN corepack pnpm install --frozen-lockfile \
+ && corepack pnpm --filter @bastion/worker build \
+ && corepack pnpm --filter @bastion/worker deploy --prod /saida \
+ && cp -r apps/worker/dist /saida/dist
+
+FROM node:24-slim
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=construtor --chown=node:node /saida ./
+USER node
+EXPOSE 3334
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3334/saude').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/principal.js"]

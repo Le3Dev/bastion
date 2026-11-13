@@ -1,0 +1,29 @@
+# Imagem de producao da API (Fastify) com Chromium para gerar PDF (Playwright).
+# Empacotamento: `pnpm deploy --prod` (pasta autossuficiente) + `dist` e `migracoes/`
+# copiados a parte. Entrypoints: dist/servidor.js, dist/migrar.js, dist/semear.js.
+# Chromium: opcao (a) `playwright install --with-deps chromium` no runtime, com o CLI
+# do proprio playwright instalado como dependencia (versao do browser sempre casa com
+# a lib) e instalando as libs de sistema via apt. Browsers em /ms-playwright (legivel
+# pelo usuario `node`). Custo: imagem grande (~1 GB+).
+FROM node:24-slim AS construtor
+ENV CI=true
+RUN corepack enable
+WORKDIR /repo
+COPY . .
+RUN corepack pnpm install --frozen-lockfile \
+ && corepack pnpm --filter @bastion/api build \
+ && corepack pnpm --filter @bastion/api deploy --prod /saida \
+ && cp -r apps/api/dist /saida/dist \
+ && cp -r apps/api/migracoes /saida/migracoes
+
+FROM node:24-slim
+ENV NODE_ENV=production \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+WORKDIR /app
+COPY --from=construtor --chown=node:node /saida ./
+RUN node node_modules/playwright/cli.js install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/* \
+ && chmod -R a+rX /ms-playwright
+USER node
+EXPOSE 3333
+CMD ["node", "dist/servidor.js"]
