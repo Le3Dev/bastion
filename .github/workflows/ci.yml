@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Follow-up: testes e2e (Playwright) nao rodam aqui; exigem a stack completa
+# (api, worker, web) e navegador instalado.
+
+jobs:
+  verificacao:
+    name: Verificacao (typecheck, lint, testes unitarios, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Habilitar corepack
+        run: corepack enable
+
+      - name: Localizar store do pnpm
+        id: pnpm-store
+        run: echo "caminho=$(corepack pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.caminho }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm lint
+      - run: corepack pnpm test
+      - run: corepack pnpm build
+
+  # Roda em paralelo com a verificacao (sem needs): o feedback chega mais
+  # rapido e as falhas de cada job sao independentes.
+  integracao:
+    name: Testes de integracao (Docker Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Habilitar corepack
+        run: corepack enable
+
+      - name: Localizar store do pnpm
+        id: pnpm-store
+        run: echo "caminho=$(corepack pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.caminho }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      - run: corepack pnpm install --frozen-lockfile
+
+      - name: Criar .env a partir do exemplo
+        run: cp .env.example .env
+
+      - name: Subir infraestrutura
+        run: docker compose up -d --wait postgres redis armazenamento alvo-de-teste alvo-vulneravel email
+
+      - name: Migrar banco
+        run: corepack pnpm --filter @bastion/api banco:migrar
+
+      - name: Migrar banco de teste
+        run: corepack pnpm --filter @bastion/api banco:migrar:teste
+
+      - name: Integracao da API
+        run: corepack pnpm --filter @bastion/api test:integracao
+
+      - name: Integracao do worker
+        run: corepack pnpm --filter @bastion/worker test:integracao
+
+      - name: Logs do Compose (falha)
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+
+      - name: Derrubar infraestrutura
+        if: always()
+        run: docker compose down -v
