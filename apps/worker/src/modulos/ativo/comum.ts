@@ -141,6 +141,7 @@ export const OWASP = {
   controleDeAcesso: 'A01:2025 Controle de Acesso Quebrado',
   configuracao: 'A02:2025 Configuração Incorreta de Segurança',
   injecao: 'A05:2025 Injeção',
+  ssrf: 'A10:2025 Falsificação de Requisição do Lado do Servidor (SSRF)',
   autenticacao: 'A07:2025 Falhas de Autenticação',
   projetoInseguro: 'A06:2025 Design Inseguro',
   llmInjecaoDePrompt: 'LLM01:2025 Injeção de Prompt',

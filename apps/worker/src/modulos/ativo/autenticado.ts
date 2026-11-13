@@ -459,6 +459,46 @@ export async function sondarInjecaoDeTemplate(
   });
 }
 
+/**
+ * Injeção de comando por marcador: duas substituições de comando que só calculam uma conta
+ * (nada é escrito, apagado ou acessado). Confirma se o resultado colado ao marcador voltar na
+ * resposta e não voltar quando o mesmo valor é enviado com o cifrão escapado (controle).
+ */
+export async function sondarInjecaoDeComando(
+  contexto: ContextoAtivo,
+  alvo: AlvoDeEntrada,
+  parametro: string,
+): Promise<Constatacao | null> {
+  const m = novoMarcador();
+  const variantes: readonly { sufixo: string; carga: string; nome: string }[] = [
+    { sufixo: 'a', carga: '$((71*89))', nome: '$(( )) (expansão aritmética)' },
+    { sufixo: 'b', carga: '$(expr 71 \\* 89)', nome: '$( ) (substituição de comando)' },
+    { sufixo: 'c', carga: '`expr 71 \\* 89`', nome: '` ` (substituição de comando)' },
+  ];
+  const valor = variantes.map((v) => `${m}${v.sufixo}${v.carga} `).join('');
+  const resposta = await enviarEntrada(contexto, alvo, parametro, valor);
+  if (resposta === null) return null;
+  const avaliada = variantes.find((v) => resposta.trechoDoCorpo.includes(`${m}${v.sufixo}6319`));
+  if (avaliada === undefined) return null;
+  const controle = await enviarEntrada(contexto, alvo, parametro, valor.split('$').join('\\$').split('`').join('\\`'));
+  if (controle === null || variantes.some((v) => controle.trechoDoCorpo.includes(`${m}${v.sufixo}6319`))) return null;
+  const posicao = resposta.trechoDoCorpo.indexOf(`${m}${avaliada.sufixo}6319`);
+  return construirConstatacao({
+    tipo: 'INJECAO_DE_COMANDO',
+    titulo: `Injeção de comando no parâmetro ${parametro}`,
+    severidade: 'CRITICA',
+    local: `parametro:${new URL(alvo.url).pathname}?${parametro}`,
+    descricao:
+      'O valor enviado foi interpolado num comando do sistema operacional: a substituição de comando foi executada e seu resultado voltou na resposta. Isso costuma permitir execução remota de comandos.',
+    requisicao: descreverEntrada(alvo, parametro, `${m}${avaliada.sufixo}${avaliada.carga}`),
+    resposta: `HTTP ${resposta.status}\n\n…${trecho(resposta.trechoDoCorpo.slice(Math.max(0, posicao - 20), posicao + 60), 80)}…`,
+    observacao: `A conta 71*89 voltou como 6319 (${avaliada.nome}) e não voltou no controle com o cifrão escapado. Foi usada apenas aritmética; nenhum comando com efeito.`,
+    correcao:
+      'Não monte comandos com entrada do usuário. Use APIs da linguagem em vez de shell e, se inevitável, passe argumentos em lista sem shell.\n\nNode: execFile("programa", [argumento]) em vez de exec(`programa ${entrada}`).',
+    owasp: [OWASP.injecao],
+  });
+}
+
 export async function sondarTravessiaDeCaminho(
   contexto: ContextoAtivo,
   alvo: AlvoDeEntrada,
@@ -511,6 +551,8 @@ export async function sondarInjecao(
       if (sql !== null) constatacoes.push(sql);
       const template = await sondarInjecaoDeTemplate(contexto, alvo, parametro);
       if (template !== null) constatacoes.push(template);
+      const comando = await sondarInjecaoDeComando(contexto, alvo, parametro);
+      if (comando !== null) constatacoes.push(comando);
       if (alvo.metodo === 'GET') {
         const travessia = await sondarTravessiaDeCaminho(contexto, alvo, parametro);
         if (travessia !== null) constatacoes.push(travessia);

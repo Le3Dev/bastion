@@ -7,6 +7,7 @@ import {
   repetirChecagensWeb,
   sondarControleDeAcesso,
   sondarInjecao,
+  sondarInjecaoDeComando,
   sondarInjecaoSql,
   sondarPaginasSemSessao,
   sondarTravessiaDeCaminho,
@@ -343,5 +344,45 @@ describe('detectores reforçados (travessia encodada e SQLi com comentário)', (
 
     expect(await sondarTravessiaDeCaminho(ambiente.contexto, alvoArquivo, 'file')).toBeNull();
     expect(await sondarInjecaoSql(ambiente.contexto, alvoItens, 'id')).toBeNull();
+  });
+});
+
+describe('injeção de comando por marcador', () => {
+  it('detecta quando a substituição de comando é executada e some no controle com cifrão escapado', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const host = url.searchParams.get('host') ?? '';
+      // Simula um shell: avalia substituições não escapadas e deixa as escapadas como texto.
+      const saida = host
+        .replace(/(?<!\\)\$\(\(71\*89\)\)/g, '6319')
+        .replace(/(?<!\\)\$\(expr 71 \\\* 89\)/g, '6319')
+        .replace(/(?<!\\)`expr 71 \\\* 89`/g, '6319');
+      return html(res, `<pre>ping ${saida}</pre>`);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const alvoDeEntrada: AlvoDeEntrada = { url: `${alvo.url}/ping`, metodo: 'GET', campos: { host: 'exemplo' } };
+
+    const constatacao = await sondarInjecaoDeComando(ambiente.contexto, alvoDeEntrada, 'host');
+    expect(constatacao?.tipo).toBe('INJECAO_DE_COMANDO');
+    expect(constatacao?.severidade).toBe('CRITICA');
+    expect(constatacao?.evidencia.resposta).toContain('6319');
+  });
+
+  it('não acusa quando a entrada é apenas refletida (com ou sem escape) nem quando o número vem de outro lugar', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const host = url.searchParams.get('host') ?? '';
+      if (url.pathname === '/eco') return html(res, `<pre>${host}</pre>`);
+      return html(res, `<pre>${escapar(host)} pedido 6319</pre>`);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    for (const caminho of ['/eco', '/outro']) {
+      const alvoDeEntrada: AlvoDeEntrada = { url: `${alvo.url}${caminho}`, metodo: 'GET', campos: { host: 'exemplo' } };
+      expect(await sondarInjecaoDeComando(ambiente.contexto, alvoDeEntrada, 'host')).toBeNull();
+    }
   });
 });

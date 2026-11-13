@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { RequisicaoBloqueada } from '../../guardiao-de-escopo/cliente-http';
 import { criarAmbiente, escapar, html, servir, type AlvoLocal } from './alvos-de-teste';
-import { descobrirPaginas, extrairFormularios } from './descoberta';
-import { avaliarWeb, detectarErroDetalhado } from './web';
+import {
+  descobrirPaginas,
+  extrairFormularios,
+  type CampoDoFormulario,
+  type FormularioDescoberto,
+  type PaginaDescoberta,
+} from './descoberta';
+import { analisarCsrf, avaliarWeb, detectarErroDetalhado } from './web';
 
 const alvos: AlvoLocal[] = [];
 const ambientes: ReturnType<typeof criarAmbiente>[] = [];
@@ -336,6 +342,91 @@ describe('reflexão por contexto, arquivos novos e CORS com origem nula', () => 
     expect(cors).toHaveLength(1);
     expect(cors[0]?.severidade).toBe('ALTA');
     expect(cors[0]?.titulo).toContain('null');
+  });
+});
+
+describe('CSRF ausente (inspeção de formulários)', () => {
+  const pagina = (formularios: FormularioDescoberto[]): PaginaDescoberta => ({
+    url: 'https://app.exemplo.com.br/',
+    metodo: 'GET',
+    status: 200,
+    formularios,
+    tamanhoDoCorpo: 100,
+    parametros: [],
+  });
+  const campo = (nome: string, tipo = 'text', valor = ''): CampoDoFormulario => ({ nome, tipo, valor });
+
+  it('acusa formulário POST sem token, uma vez por ação, e ignora login, busca, token oculto e GET', () => {
+    const achados = analisarCsrf([
+      pagina([
+        { acao: 'https://app.exemplo.com.br/perfil', metodo: 'POST', campos: [campo('nome'), campo('email')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/perfil', metodo: 'POST', campos: [campo('nome'), campo('email')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/entrar', metodo: 'POST', campos: [campo('u'), campo('s', 'password')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/busca', metodo: 'POST', campos: [campo('q'), campo('f')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/filtrar', metodo: 'POST', campos: [campo('termo')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/conta', metodo: 'POST', campos: [campo('a'), campo('_t', 'hidden', 'x')], tokenCsrf: { nome: '_t', valor: 'x' } },
+        { acao: 'https://app.exemplo.com.br/dados', metodo: 'POST', campos: [campo('a'), campo('anti_token', 'hidden', 'x')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/lista', metodo: 'GET', campos: [campo('a'), campo('b')], tokenCsrf: null },
+      ]),
+    ]);
+    expect(achados).toHaveLength(1);
+    expect(achados[0]?.tipo).toBe('CSRF_AUSENTE');
+    expect(achados[0]?.severidade).toBe('MEDIA');
+    expect(achados[0]?.local).toBe('formulario:/perfil');
+    expect(achados[0]?.evidencia.resposta).toContain('nome, email');
+    expect(achados[0]?.evidencia.observacao).toContain('confirme manualmente');
+  });
+});
+
+describe('SSRF por destino reservado', () => {
+  const PAGINA = '<html><body><a href="/buscar-url?url=/imagem.png">i</a></body></html>';
+
+  async function avaliar(manipulador: Parameters<typeof servir>[0]): Promise<Awaited<ReturnType<typeof avaliarWeb>>> {
+    const alvo = await servir(manipulador);
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const urlInicial = `${alvo.url}/`;
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial });
+    return avaliarWeb({ contexto: ambiente.contexto, urlInicial, paginas });
+  }
+
+  it('acusa quando a resposta traz erro de DNS do destino de teste', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      const destino = url.searchParams.get('url') ?? '';
+      if (destino.startsWith('http://')) {
+        return html(res, `<pre>Error: getaddrinfo ENOTFOUND ${new URL(destino).hostname}</pre>`, 502);
+      }
+      html(res, '<p>imagem</p>');
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'SSRF');
+    expect(achado?.severidade).toBe('MEDIA');
+    expect(achado?.local).toBe('parametro:/buscar-url?url');
+    expect(achado?.evidencia.requisicao).toContain('bastion-teste.invalid');
+  });
+
+  it('não acusa quando o valor apenas é refletido ou ignorado', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      html(res, `<p>Você pediu ${escapar(url.searchParams.get('url') ?? '')}</p>`);
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'SSRF')).toEqual([]);
+  });
+
+  it('não acusa quando o erro de DNS aparece também no controle malformado', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      const destino = url.searchParams.get('url') ?? '';
+      html(res, destino.startsWith('/') ? '<p>ok</p>' : `<pre>getaddrinfo ENOTFOUND ${escapar(destino)}</pre>`);
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'SSRF')).toEqual([]);
   });
 });
 
