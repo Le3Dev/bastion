@@ -206,6 +206,47 @@ async function tratar(req, res) {
     return html(res, 200, `<html><body><h1>Saudação</h1><script>var usuario = '${user}'; document.title = usuario;</script></body></html>`);
   }
 
+  // INJEÇÃO DE COMANDO (SIMULADA): "ping" com o host concatenado. SIMULAÇÃO DE
+  // LABORATÓRIO: nenhum shell é executado; só interpretamos $((a op b)) e
+  // $(expr a op b) devolvendo o resultado, como um shell real faria.
+  if (rota === '/ping') {
+    const host = q.get('host') ?? '';
+    let saida = `PING ${host}: 56 data bytes\n64 bytes from ${host}: icmp_seq=0 ttl=64 time=0.5 ms\n`;
+    // (?<!\\): "\$" escapado é literal num shell real, então não avalia.
+    const m = /(?<!\\)\$\(\(?\s*(?:expr\s+)?(\d{1,6})\s*([-+*/])\s*(\d{1,6})\s*\)?\)/.exec(host);
+    if (m) {
+      const a = Number(m[1]); const b = Number(m[3]);
+      const r = m[2] === '+' ? a + b : m[2] === '-' ? a - b : m[2] === '*' ? a * b : (b === 0 ? 0 : Math.trunc(a / b));
+      saida = `ping: ${host.replace(m[0], String(r))}: Name or service not known\n`;
+    }
+    return texto(res, 200, saida);
+  }
+
+  // CSRF AUSENTE: formulário que muda estado sem nenhum token anti-CSRF.
+  if (rota === '/transferencia') {
+    return html(res, 200,
+      '<html><body><h1>Transferência</h1><form method="POST" action="/transferencia">' +
+      '<label>Valor <input type="text" name="valor"></label>' +
+      '<label>Destino <input type="text" name="destino"></label>' +
+      '<button type="submit">Enviar</button></form></body></html>');
+  }
+
+  // SSRF: o servidor busca a URL informada e ecoa host/motivo do erro.
+  if (rota === '/busca-url') {
+    const alvo = q.get('alvo') ?? '';
+    if (!/^https?:\/\//i.test(alvo)) return texto(res, 400, 'apenas http:// ou https://');
+    try {
+      const r = await fetch(alvo, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
+      return texto(res, 200, `busca de ${alvo}: status ${r.status}`);
+    } catch (e) {
+      const causa = e && e.cause ? e.cause : e;
+      const motivo = (causa && (causa.code === 'ENOTFOUND' ? `getaddrinfo ENOTFOUND ${causa.hostname || ''}` : causa.code || causa.message)) || 'falha';
+      let host = '';
+      try { host = new URL(alvo).hostname; } catch { /* ignora */ }
+      return texto(res, 200, `erro ao buscar ${alvo}: ${motivo} (host ${host})`);
+    }
+  }
+
   // CHATBOT DE IA VULNERÁVEL.
   if (rota === '/ia' && req.method === 'POST') {
     let mensagem = '';
@@ -221,6 +262,7 @@ async function tratar(req, res) {
   if (rota === '/') {
     return html(res, 200,
       '<html><body><h1>Alvo vulnerável de laboratório</h1><p>Inseguro de propósito. Nunca em produção.</p><ul>' +
+      '<li><a href="/ping?host=1.1.1.1">Ping</a></li>' +
       '<li><a href="/busca?q=ola">Busca</a></li>' +
       '<li><a href="/erro?v=1">Erro</a></li>' +
       '<li><a href="/redir?para=/">Redirecionamento</a></li>' +
@@ -229,6 +271,8 @@ async function tratar(req, res) {
       '<li><a href="/arquivo?nome=leia-me.txt">Arquivo</a></li>' +
       '<li><a href="/perfil?nome=visitante">Perfil</a></li>' +
       '<li><a href="/saudacao?user=visitante">Saudação</a></li>' +
+      '<li><a href="/transferencia">Transferência</a></li>' +
+      '<li><a href="/busca-url?alvo=http://exemplo.com">Busca URL</a></li>' +
       '<li><a href="/conta?id=1">Conta</a></li>' +
       '<li><a href="/uploads/">Uploads</a></li>' +
       '<li><a href="/api/dados">API</a></li>' +
