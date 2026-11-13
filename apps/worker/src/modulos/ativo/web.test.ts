@@ -255,6 +255,90 @@ describe('módulo ativo web (perfil PADRAO)', () => {
   });
 });
 
+describe('reflexão por contexto, arquivos novos e CORS com origem nula', () => {
+  const PAGINA = '<html><body><a href="/r?q=1">r</a></body></html>';
+
+  async function avaliar(
+    manipulador: Parameters<typeof servir>[0],
+  ): Promise<{ alvo: AlvoLocal; constatacoes: Awaited<ReturnType<typeof avaliarWeb>> }> {
+    const alvo = await servir(manipulador);
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const urlInicial = `${alvo.url}/`;
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial });
+    const constatacoes = await avaliarWeb({ contexto: ambiente.contexto, urlInicial, paginas });
+    return { alvo, constatacoes };
+  }
+
+  const pagina = (res: Parameters<typeof html>[0], caminho: string, corpo: string): void =>
+    caminho === '/' ? html(res, PAGINA) : html(res, corpo, caminho === '/r' ? 200 : 404);
+
+  it('detecta reflexão em atributo quando a aspa sobrevive', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = (url.searchParams.get('q') ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      pagina(res, url.pathname, `<html><input name="q" value="${q}"></html>`);
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE');
+    expect(achado?.titulo).toContain('atributo');
+    expect(achado?.severidade).toBe('ALTA');
+  });
+
+  it('detecta reflexão em string JavaScript com aspa simples intacta', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = (url.searchParams.get('q') ?? '').replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/"/g, '\\"');
+      pagina(res, url.pathname, `<html><script>var termo = '${q}';</script></html>`);
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE');
+    expect(achado?.titulo).toContain('script');
+  });
+
+  it('não acusa páginas que escapam corretamente em corpo, atributo e script', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = url.searchParams.get('q') ?? '';
+      const seguro = escapar(q).replace(/'/g, '&#39;');
+      const js = JSON.stringify(q).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/'/g, '\\u0027');
+      pagina(
+        res,
+        url.pathname,
+        `<html><p>${seguro}</p><input value="${seguro}"><script>var a = ${js}; var b = '${js.slice(1, -1)}';</script></html>`,
+      );
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE')).toEqual([]);
+  });
+
+  it('detecta /.env.local, mascarando os valores', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      if (req.url === '/.env.local') return void res.end('API_TOKEN=valor-ultra-secreto\n');
+      html(res, '<html>x</html>', 404);
+    });
+    const achado = constatacoes.find((c) => c.local === 'caminho:/.env.local');
+    expect(achado?.tipo).toBe('ARQUIVO_SENSIVEL_EXPOSTO');
+    expect(JSON.stringify(constatacoes)).not.toContain('valor-ultra-secreto');
+  });
+
+  it('detecta CORS com Origin: null e credenciais, só quando a origem é nula', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, { allow: 'GET, HEAD, OPTIONS' });
+        return void res.end();
+      }
+      if (req.headers.origin === 'null') {
+        res.setHeader('access-control-allow-origin', 'null');
+        res.setHeader('access-control-allow-credentials', 'true');
+      }
+      html(res, '<html>x</html>', 404);
+    });
+    const cors = constatacoes.filter((c) => c.tipo === 'CORS_PERMISSIVO');
+    expect(cors).toHaveLength(1);
+    expect(cors[0]?.severidade).toBe('ALTA');
+    expect(cors[0]?.titulo).toContain('null');
+  });
+});
+
 describe('freios do contexto', () => {
   it('recusa POST quando a criação de dados não foi autorizada, sem tocar o alvo', async () => {
     const alvo = await servidorSaudavel();

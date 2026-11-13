@@ -7,10 +7,13 @@ import {
   repetirChecagensWeb,
   sondarControleDeAcesso,
   sondarInjecao,
+  sondarInjecaoSql,
   sondarPaginasSemSessao,
+  sondarTravessiaDeCaminho,
 } from './autenticado';
 import { criarAmbiente, escapar, html, servir, type AlvoLocal } from './alvos-de-teste';
 import { descobrirPaginas } from './descoberta';
+import type { AlvoDeEntrada } from './entradas';
 
 const SENHA = 'S3nha-Forte!';
 const credencial: CredencialDeTeste = {
@@ -264,5 +267,81 @@ describe('módulo ativo autenticado (perfil COMPLETO)', () => {
   it('não acusa nada em um alvo autenticado saudável (sem falso positivo)', async () => {
     const { constatacoes } = await avaliarAutenticado(false);
     expect(constatacoes).toEqual([]);
+  });
+});
+
+describe('detectores reforçados (travessia encodada e SQLi com comentário)', () => {
+  it('detecta travessia de caminho quando a aplicação só decodifica a forma percent-encoded (aceita %2e%2e/%2f, rejeita a forma crua)', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const bruto = url.searchParams.get('file') ?? '';
+      // Filtro ingênuo: só bloqueia a sequência crua "../" ou "..\"; não reavalia após decodificar.
+      if (/\.\.[\\/]/.test(bruto)) return html(res, '<p>Bloqueado</p>', 403);
+      let caminho = bruto;
+      try {
+        caminho = decodeURIComponent(bruto);
+      } catch {
+        // valor malformado: segue com o bruto
+      }
+      if (caminho.includes('..') && caminho.includes('etc/passwd')) {
+        return void res.end('root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1::/:/sbin/nologin\n');
+      }
+      return html(res, `<p>Arquivo: ${escapar(bruto)}</p>`);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const alvoDeEntrada: AlvoDeEntrada = { url: `${alvo.url}/arq`, metodo: 'GET', campos: { file: 'ajuda.txt' } };
+
+    const constatacao = await sondarTravessiaDeCaminho(ambiente.contexto, alvoDeEntrada, 'file');
+    expect(constatacao?.tipo).toBe('TRAVESSIA_DE_CAMINHO');
+    expect(constatacao?.evidencia.requisicao).toMatch(/%252e|%252f/i);
+    expect(constatacao?.evidencia.resposta).toContain('root:x:0:0:');
+    expect(constatacao?.evidencia.resposta).not.toContain('daemon');
+    // Nenhuma requisição com a forma crua chegou a vazar o arquivo (o filtro bloqueou-as com 403).
+    expect(alvo.pedidos.some((p) => p.includes('%252f') || p.includes('%252e'))).toBe(true);
+  });
+
+  it('detecta injeção de SQL booleana só na variante com comentário de linha', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const id = url.searchParams.get('id') ?? '';
+      // Simula "WHERE id = '<id>' AND publicado = 1": só o comentário corta a cláusula extra.
+      const falsoComComentario = /'1'\s*=\s*'2'\s*(--\s|#)/.test(id);
+      return html(res, falsoComComentario ? '<p>Resultados: 0</p>' : '<p>Resultados: 1 -> item do catálogo</p>');
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const alvoDeEntrada: AlvoDeEntrada = { url: `${alvo.url}/itens`, metodo: 'GET', campos: { id: '1' } };
+
+    const constatacao = await sondarInjecaoSql(ambiente.contexto, alvoDeEntrada, 'id');
+    expect(constatacao?.tipo).toBe('INJECAO_SQL');
+    expect(constatacao?.titulo).toContain('booleana');
+    expect(constatacao?.evidencia.observacao).toMatch(/comentário/);
+    expect(constatacao?.severidade).toBe('CRITICA');
+  });
+
+  it('não acusa travessia nem SQLi em alvos que tratam a entrada com segurança', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/arq') {
+        const bruto = url.searchParams.get('file') ?? '';
+        return html(res, `<p>Arquivo: ${escapar(bruto)}</p>`); // nunca lê do disco
+      }
+      if (url.pathname === '/itens') {
+        return html(res, '<p>Resultados: 1 -> item do catálogo</p>'); // consulta sempre parametrizada
+      }
+      return html(res, 'não encontrado', 404);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+
+    const alvoArquivo: AlvoDeEntrada = { url: `${alvo.url}/arq`, metodo: 'GET', campos: { file: 'ajuda.txt' } };
+    const alvoItens: AlvoDeEntrada = { url: `${alvo.url}/itens`, metodo: 'GET', campos: { id: '1' } };
+
+    expect(await sondarTravessiaDeCaminho(ambiente.contexto, alvoArquivo, 'file')).toBeNull();
+    expect(await sondarInjecaoSql(ambiente.contexto, alvoItens, 'id')).toBeNull();
   });
 });

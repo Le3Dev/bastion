@@ -58,6 +58,43 @@ export const ARQUIVOS_SENSIVEIS: readonly ArquivoSensivel[] = [
     mascarar: true,
   },
   {
+    caminho: '/.git/config',
+    confirma: /^\[core\][\s\S]{0,200}?\b(?:repositoryformatversion|filemode|bare)\s*=/m,
+    titulo: 'Configuração do Git (.git/config) exposta',
+    severidade: 'ALTA',
+    descricao: 'O arquivo de configuração do repositório está público e pode revelar URLs de remotos (inclusive com credenciais embutidas).',
+  },
+  {
+    caminho: '/.env.local',
+    confirma: /^[A-Z][A-Z0-9_]*=.*/m,
+    titulo: 'Arquivo .env.local exposto',
+    severidade: 'CRITICA',
+    descricao: 'O arquivo de variáveis de ambiente local está público e costuma conter senhas, chaves de API e strings de conexão.',
+    mascarar: true,
+  },
+  {
+    caminho: '/.DS_Store',
+    confirma: /Bud1/,
+    titulo: 'Arquivo .DS_Store exposto',
+    severidade: 'BAIXA',
+    descricao: 'O metadado de pasta do macOS está público e revela nomes de arquivos e diretórios do servidor.',
+  },
+  {
+    caminho: '/WEB-INF/web.xml',
+    confirma: /<web-app[\s>]/i,
+    titulo: 'Descritor WEB-INF/web.xml exposto',
+    severidade: 'ALTA',
+    descricao: 'O descritor da aplicação Java está acessível e revela servlets, filtros, mapeamentos e configurações internas.',
+  },
+  {
+    caminho: '/docker-compose.yml',
+    confirma: /^services:\s*\r?\n\s+[\w.-]+:/m,
+    titulo: 'Arquivo docker-compose.yml exposto',
+    severidade: 'ALTA',
+    descricao: 'A definição da infraestrutura em contêineres está pública e costuma revelar serviços internos, portas e variáveis de ambiente.',
+    mascarar: true,
+  },
+  {
     caminho: '/backup.sql',
     confirma: /CREATE TABLE|INSERT INTO|DROP TABLE/i,
     titulo: 'Backup de banco de dados exposto',
@@ -259,11 +296,38 @@ export function analisarMetodos(url: string, resposta: RespostaHttp): Constataca
   });
 }
 
+/** Servidor que aceita `Origin: null` com credenciais (iframes sandbox e arquivos locais conseguem explorar). */
+export function analisarCorsOrigemNula(url: string, resposta: RespostaHttp): Constatacao | null {
+  if (cabecalho(resposta, 'access-control-allow-origin') !== 'null') return null;
+  if (cabecalho(resposta, 'access-control-allow-credentials')?.toLowerCase() !== 'true') return null;
+  return construirConstatacao({
+    tipo: 'CORS_PERMISSIVO',
+    titulo: 'CORS aceita a origem "null" com credenciais',
+    severidade: 'ALTA',
+    local: 'cabecalho:access-control-allow-origin',
+    descricao:
+      'O servidor aceita Origin: null e permite credenciais. Páginas em iframe sandbox ou documentos locais enviam essa origem e podem ler respostas autenticadas do usuário.',
+    requisicao: `${descreverPedido('GET', url)}\norigin: null`,
+    resposta: resumirResposta(resposta, ['access-control-allow-origin', 'access-control-allow-credentials'], 0),
+    observacao: 'A origem "null" foi aceita junto com Access-Control-Allow-Credentials: true.',
+    correcao:
+      'Nunca inclua "null" na lista de origens permitidas; valide contra uma lista fixa de origens https.\n\nExpress (cors):\napp.use(cors({ origin: ["https://app.exemplo.com.br"], credentials: true }));',
+    owasp: [OWASP.configuracao],
+  });
+}
+
 export async function sondarCorsEMetodos(contexto: ContextoAtivo, urlInicial: string): Promise<Constatacao[]> {
   const constatacoes: Constatacao[] = [];
   const cors = await contexto.enviar({ url: urlInicial, cabecalhos: { origin: ORIGEM_DE_TESTE } });
   const achadoCors = cors === null ? null : analisarCors(urlInicial, cors);
-  if (achadoCors !== null) constatacoes.push(achadoCors);
+  if (achadoCors !== null) {
+    constatacoes.push(achadoCors);
+  } else {
+    // Só vale a sondagem extra quando a origem arbitrária não foi aceita (senão o achado acima já cobre).
+    const nula = await contexto.enviar({ url: urlInicial, cabecalhos: { origin: 'null' } });
+    const achadoNulo = nula === null ? null : analisarCorsOrigemNula(urlInicial, nula);
+    if (achadoNulo !== null) constatacoes.push(achadoNulo);
+  }
 
   const opcoes = await contexto.enviar({ url: urlInicial, metodo: 'OPTIONS' });
   const achadoMetodos = opcoes === null ? null : analisarMetodos(urlInicial, opcoes);
@@ -327,7 +391,65 @@ export function analisarRedirecionamento(url: string, parametro: string, respost
 // ---------------------------------------------------------------------------------------------
 
 /** Marcador inócuo: uma tag HTML desconhecida e vazia, sem script nem atributo executável. */
-export const sondaDeReflexao = (marcador: string): string => `${marcador}<i>`;
+export const sondaDeReflexao = (marcador: string): string => `${marcador}<i>${marcador}"${marcador}'`;
+
+type ContextoDeReflexao = 'corpo HTML' | 'atributo' | 'script';
+
+const DESCRICAO_DO_CONTEXTO: Record<ContextoDeReflexao, string> = {
+  'corpo HTML':
+    'O valor enviado volta no HTML com os caracteres < e > intactos. É o indício clássico de XSS refletido: um atacante pode injetar marcação e scripts na página.',
+  atributo:
+    'O valor enviado volta dentro de um atributo HTML com a aspa intacta, permitindo sair do atributo e injetar novos atributos ou marcação (XSS refletido em atributo).',
+  script:
+    'O valor enviado volta dentro de uma string JavaScript com a aspa simples intacta, permitindo encerrar a string e injetar código (XSS refletido em script).',
+};
+
+/** Classifica onde o marcador (na posição dada) caiu e se o caractere de escape relevante sobreviveu. */
+function contextoDaOcorrencia(
+  original: string,
+  corpo: string,
+  posicao: number,
+  marcador: string,
+): ContextoDeReflexao | null {
+  const depois = original.slice(posicao + marcador.length, posicao + marcador.length + 3);
+  const abertura = corpo.lastIndexOf('<script', posicao);
+  const dentroDeScript =
+    abertura !== -1 &&
+    abertura > corpo.lastIndexOf('</script', posicao) &&
+    corpo.indexOf('>', abertura) !== -1 &&
+    corpo.indexOf('>', abertura) < posicao;
+  if (dentroDeScript) {
+    const texto = corpo.slice(corpo.indexOf('>', abertura) + 1, posicao);
+    const cadeia = /(?:[=(:,[]|\breturn)\s*(?:(')(?:[^'\\\n]|\\.)*|(")(?:[^"\\\n]|\\.)*)$/.exec(texto);
+    const delimitador = cadeia === null ? undefined : (cadeia[1] ?? cadeia[2]);
+    if (delimitador !== undefined && depois.startsWith(delimitador)) return 'script';
+    return depois.startsWith('<i>') ? 'corpo HTML' : null;
+  }
+  const inicioDaTag = corpo.lastIndexOf('<', posicao);
+  if (inicioDaTag !== -1 && inicioDaTag > corpo.lastIndexOf('>', posicao)) {
+    const atributo = /=\s*("[^"]*|'[^']*)$/.exec(corpo.slice(inicioDaTag, posicao));
+    if (atributo === null) return null;
+    return depois.startsWith((atributo[1] ?? '').charAt(0)) ? 'atributo' : null;
+  }
+  return depois.startsWith('<i>') ? 'corpo HTML' : null;
+}
+
+function localizarReflexao(corpo: string, marcador: string): { contexto: ContextoDeReflexao; posicao: number } | null {
+  const achados: { contexto: ContextoDeReflexao; posicao: number }[] = [];
+  // Neutraliza o `<i>` da própria sonda (mesmo tamanho) para ele não ser lido como início de tag ao classificar o contexto.
+  const neutro = corpo.split(`${marcador}<i>`).join(`${marcador}___`);
+  let posicao = corpo.indexOf(marcador);
+  while (posicao !== -1) {
+    const contexto = contextoDaOcorrencia(corpo, neutro, posicao, marcador);
+    if (contexto !== null) achados.push({ contexto, posicao });
+    posicao = corpo.indexOf(marcador, posicao + marcador.length);
+  }
+  for (const preferido of ['script', 'atributo', 'corpo HTML'] as const) {
+    const achado = achados.find((item) => item.contexto === preferido);
+    if (achado !== undefined) return achado;
+  }
+  return null;
+}
 
 export function analisarReflexao(
   alvo: AlvoDeEntrada,
@@ -337,19 +459,19 @@ export function analisarReflexao(
 ): Constatacao | null {
   if (!ehHtml(resposta)) return null;
   const corpo = resposta.trechoDoCorpo;
-  const posicao = corpo.indexOf(sondaDeReflexao(marcador));
-  if (posicao === -1) return null;
+  const reflexao = localizarReflexao(corpo, marcador);
+  if (reflexao === null) return null;
+  const { contexto, posicao } = reflexao;
   const caminho = new URL(alvo.url).pathname;
   return construirConstatacao({
     tipo: 'ENTRADA_REFLETIDA_SEM_ESCAPE',
-    titulo: `Entrada refletida sem escape no parâmetro ${parametro}`,
+    titulo: `Entrada refletida sem escape no parâmetro ${parametro} (contexto: ${contexto})`,
     severidade: 'ALTA',
     local: `parametro:${caminho}?${parametro}`,
-    descricao:
-      'O valor enviado volta no HTML com os caracteres < e > intactos. É o indício clássico de XSS refletido: um atacante pode injetar marcação e scripts na página.',
+    descricao: DESCRICAO_DO_CONTEXTO[contexto],
     requisicao: descreverEntrada(alvo, parametro, sondaDeReflexao(marcador)),
     resposta: `HTTP ${resposta.status}\n\n…${trecho(corpo.slice(Math.max(0, posicao - 40), posicao + 80), 160)}…`,
-    observacao: 'Foi usado apenas um marcador inofensivo (tag <i> vazia); nenhum script foi enviado.',
+    observacao: 'Foi usado apenas um marcador inofensivo (tag <i> vazia e aspas); nenhum script foi enviado.',
     correcao:
       'Escape toda saída conforme o contexto (HTML, atributo, JS) e adicione CSP.\n\nUse o auto-escape do template engine e evite innerHTML/dangerouslySetInnerHTML com dados do usuário.',
     owasp: [OWASP.injecao],
