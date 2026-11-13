@@ -19,6 +19,12 @@ const EsquemaDoAmbiente = z.object({
     .min(1, 'deve ser no mínimo 1.')
     .max(32, 'deve ser no máximo 32.')
     .default(2),
+  WORKER_PORTA: z.coerce
+    .number({ error: 'deve ser um número.' })
+    .int('deve ser inteiro.')
+    .min(1, 'deve ser no mínimo 1.')
+    .max(65535, 'deve ser no máximo 65535.')
+    .default(3334),
 });
 
 export interface ConfigDoWorker {
@@ -26,6 +32,7 @@ export interface ConfigDoWorker {
   permitirRedesPrivadas: boolean;
   requisicoesPorSegundo: number;
   concorrenciaDeAvaliacoes: number;
+  portaDeSaude: number;
 }
 
 /** Lê e valida o ambiente. Variáveis vazias valem como ausentes. */
@@ -55,5 +62,6 @@ export function lerConfig(
     permitirRedesPrivadas: dados.GUARDIAO_PERMITIR_REDES_PRIVADAS,
     requisicoesPorSegundo: dados.GUARDIAO_REQUISICOES_POR_SEGUNDO,
     concorrenciaDeAvaliacoes: dados.WORKER_CONCORRENCIA_AVALIACOES,
+    portaDeSaude: dados.WORKER_PORTA,
   };
 }

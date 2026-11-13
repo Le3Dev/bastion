@@ -14,7 +14,8 @@ async function principal(): Promise<void> {
 
   const pool = new pg.Pool({ connectionString: url })
   try {
-    const raiz = join(import.meta.dirname, '..', 'migracoes')
+    // Mesma posição relativa em scripts/ (tsx) e dist/ (bundle); MIGRACOES_DIR sobrescreve.
+    const raiz = process.env.MIGRACOES_DIR ?? join(import.meta.dirname, '..', 'migracoes')
 
     console.log('Aplicando migrações geradas...')
     await migrate(drizzle(pool), { migrationsFolder: join(raiz, 'geradas') })

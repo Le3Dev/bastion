@@ -3,5 +3,5 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(js.configs.recommended, tseslint.configs.recommended, {
-  ignores: ['node_modules/**', 'migracoes/**'],
+  ignores: ['node_modules/**', 'migracoes/**', 'dist/**'],
 });

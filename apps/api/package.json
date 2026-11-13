@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/servidor.ts",
-    "start": "tsx --env-file-if-exists=../../.env src/servidor.ts",
+    "start": "node dist/servidor.js",
+    "build": "tsup",
+    "start:tsx": "tsx --env-file-if-exists=../../.env src/servidor.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -41,6 +43,7 @@
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
+    "tsup": "^9.0.0",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.2",
