@@ -184,11 +184,26 @@ async function tratar(req, res) {
 
   // TRAVESSIA DE CAMINHO SIMULADA: não toca no disco; devolve conteúdo marcado.
   if (rota === '/arquivo') {
-    const nome = q.get('nome') ?? '';
-    if (/\.\.[\\/]|%2e%2e/i.test(nome)) {
+    const bruto = q.get('nome') ?? '';
+    // Decodifica percent-encoding (inseguro de propósito): a forma codificada vale como a crua.
+    let nome = bruto;
+    try { nome = decodeURIComponent(bruto); } catch { /* mantém o valor cru */ }
+    if (/\.\.[\\/]|%2e%2e/i.test(nome) || /\.\.[\\/]|%2e%2e/i.test(bruto)) {
       return texto(res, 200, 'root:x:0:0:root:/root:/bin/sh\n# CONTEUDO-SIMULADO-DE-TRAVESSIA-BASTION\n');
     }
     return texto(res, 200, 'conteudo-comum');
+  }
+
+  // XSS REFLETIDO EM CONTEXTO DE ATRIBUTO: valor cru dentro de value="...".
+  if (rota === '/perfil') {
+    const nome = q.get('nome') ?? '';
+    return html(res, 200, `<html><body><h1>Perfil</h1><form><input type="text" name="nome" value="${nome}"></form></body></html>`);
+  }
+
+  // XSS REFLETIDO EM CONTEXTO DE STRING JAVASCRIPT: valor cru dentro de '...'.
+  if (rota === '/saudacao') {
+    const user = q.get('user') ?? '';
+    return html(res, 200, `<html><body><h1>Saudação</h1><script>var usuario = '${user}'; document.title = usuario;</script></body></html>`);
   }
 
   // CHATBOT DE IA VULNERÁVEL.
@@ -212,6 +227,8 @@ async function tratar(req, res) {
       '<li><a href="/produtos?cat=1">Produtos</a></li>' +
       '<li><a href="/ola?nome=visitante">Olá</a></li>' +
       '<li><a href="/arquivo?nome=leia-me.txt">Arquivo</a></li>' +
+      '<li><a href="/perfil?nome=visitante">Perfil</a></li>' +
+      '<li><a href="/saudacao?user=visitante">Saudação</a></li>' +
       '<li><a href="/conta?id=1">Conta</a></li>' +
       '<li><a href="/uploads/">Uploads</a></li>' +
       '<li><a href="/api/dados">API</a></li>' +
