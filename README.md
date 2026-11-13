@@ -264,6 +264,8 @@ Como os perfis ativos chegam ao worker: ao solicitar a avaliação, a API confer
 
 Como os perfis ativos encontram o que testar: a descoberta, só por GET e dentro do escopo, parte da URL do sistema, segue links e formulários do mesmo host e também lê `robots.txt` (caminhos concretos de `Allow`/`Disallow`), `sitemap.xml` e uma lista curta de caminhos comuns (`/login`, `/admin`, `/api`, `/busca`, `/conta`, `/produtos`, `/uploads/`, `/perfil`, `/painel`). Ela respeita os caminhos excluídos, nunca segue links com cara de sair ou apagar, tem teto de páginas e conta no teto de requisições do perfil. Os nomes de parâmetros reais vistos nas URLs, inclusive em respostas não-HTML (texto, JSON ou erro), alimentam as sondas de entrada; o redirecionamento aberto também testa nomes em português (`para`, `destino`, `retorno`...) e qualquer parâmetro cujo valor pareça URL ou caminho. No perfil `IA`, o vazamento de dados é detectado pelas `frasesSigilosas` do conector, sem diferenciar maiúsculas, além dos padrões genéricos (canário, CPF válido, credenciais).
 
+Reforços de detecção: o perfil `PADRAO` agora detecta entrada refletida também em contexto de atributo HTML e de string JavaScript, além de arquivos sensíveis expostos e CORS que aceita origem nula. O perfil `COMPLETO` detecta travessia de caminho mesmo com codificação percent-encoding e injeção de SQL com variações de comentário. O alvo de laboratório ganhou as rotas `/perfil` e `/saudacao` (XSS em atributo e em string JS) para provar esses detectores ao vivo.
+
 #### Segurança dos perfis ativos
 
 Salvaguardas valem para qualquer avaliação ativa:
