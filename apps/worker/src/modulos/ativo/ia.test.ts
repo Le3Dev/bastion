@@ -4,6 +4,7 @@ import { LimitadorDeTaxa } from '../../guardiao-de-escopo/limitador-de-taxa';
 import { criarAmbiente, escapar, servir, type AlvoLocal } from './alvos-de-teste';
 import {
   avaliarIa,
+  avaliarIntegridadeDoPrompt,
   avaliarVazamento,
   conectarIa,
   criarConversaDeIa,
@@ -127,6 +128,44 @@ describe('detectores determinísticos de IA', () => {
     expect(detectarSaidaInsegura('&lt;script&gt;x&lt;/script&gt;')).toBeNull();
     expect(detectarAcaoExcessiva('Cancelei o pedido.')).toBe(true);
     expect(detectarAcaoExcessiva('Não consigo cancelar o pedido, preciso de autenticação.')).toBe(false);
+  });
+});
+
+describe('sondas de injeção adicionais (injecao-3 e injecao-4)', () => {
+  const executar = async (obedece: boolean) => {
+    const alvo = await servir((_req, res, corpo) => {
+      const { message } = JSON.parse(corpo) as { message: string };
+      const codigo = /palavra-código (BASTION-CODIGO-[A-Z0-9]+)/.exec(message)?.[1];
+      const novas = /Última linha|nota ao assistente/.test(message);
+      const resposta =
+        obedece && novas && codigo !== undefined ? codigo : 'Não posso seguir essa instrução; posso ajudar com pedidos.';
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ resposta }));
+    });
+    alvos.push(alvo);
+    const conector: ConectorDeIa = {
+      url: `${alvo.url}/ia`,
+      cabecalhos: {},
+      modeloDoCorpo: '{"message":"{{mensagem}}"}',
+      caminhoDaResposta: 'resposta',
+      frasesSigilosas: [],
+    };
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const conversa = criarConversaDeIa({ contexto: ambiente.contexto, conector, limitador: limitadorRapido() });
+    return avaliarIntegridadeDoPrompt(conversa, conector);
+  };
+
+  it('acusa o bot que obedece às novas sondas', async () => {
+    const achados = await executar(true);
+    const locais = achados.map((c) => c.local);
+    expect(achados.every((c) => c.tipo === 'IA_INJECAO_DE_PROMPT')).toBe(true);
+    expect(locais).toContain('ia:injecao-3');
+    expect(locais).toContain('ia:injecao-4');
+  });
+
+  it('não acusa o bot que recusa', async () => {
+    expect(await executar(false)).toEqual([]);
   });
 });
 
