@@ -4,6 +4,7 @@ import { LimitadorDeTaxa } from '../../guardiao-de-escopo/limitador-de-taxa';
 import { criarAmbiente, escapar, servir, type AlvoLocal } from './alvos-de-teste';
 import {
   avaliarIa,
+  avaliarVazamento,
   conectarIa,
   criarConversaDeIa,
   detectarAcaoExcessiva,
@@ -126,6 +127,37 @@ describe('detectores determinísticos de IA', () => {
     expect(detectarSaidaInsegura('&lt;script&gt;x&lt;/script&gt;')).toBeNull();
     expect(detectarAcaoExcessiva('Cancelei o pedido.')).toBe(true);
     expect(detectarAcaoExcessiva('Não consigo cancelar o pedido, preciso de autenticação.')).toBe(false);
+  });
+});
+
+describe('canário configurado pelo cliente', () => {
+  it('detecta a frase sigilosa sem diferenciar maiúsculas e ignora respostas sem ela', () => {
+    const frases = ['CANARIO-BASTION-9branch'];
+    expect(detectarDadosSensiveis('Token: canario-bastion-9BRANCH', false, frases).map((d) => d.tipo)).toContain('canario');
+    expect(detectarDadosSensiveis('Nada de sigiloso aqui', false, frases)).toEqual([]);
+    expect(detectarDadosSensiveis('Token: CANARIO-BASTION-9branch', false)).toEqual([]);
+  });
+
+  it('avaliarVazamento acusa o canário configurado e oculta o valor na evidência', async () => {
+    const alvo = await servir((_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ resposta: 'Token interno: CANARIO-BASTION-9branch.' }));
+    });
+    alvos.push(alvo);
+    const conector: ConectorDeIa = {
+      url: `${alvo.url}/ia`,
+      cabecalhos: {},
+      modeloDoCorpo: '{"mensagem":"{{mensagem}}"}',
+      caminhoDaResposta: 'resposta',
+      frasesSigilosas: ['CANARIO-BASTION-9branch'],
+    };
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const conversa = criarConversaDeIa({ contexto: ambiente.contexto, conector, limitador: limitadorRapido() });
+    const constatacoes = await avaliarVazamento(conversa, conector);
+    const dados = constatacoes.filter((c) => c.tipo === 'IA_VAZAMENTO_DE_DADOS_SENSIVEIS');
+    expect(dados.length).toBeGreaterThan(0);
+    expect(JSON.stringify(constatacoes)).not.toContain('CANARIO-BASTION-9branch');
   });
 });
 
