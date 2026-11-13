@@ -23,6 +23,8 @@ export interface PaginaDescoberta {
   formularios: FormularioDescoberto[];
   /** Tamanho do trecho do corpo recebido (para comparar respostas sem guardar conteúdo). */
   tamanhoDoCorpo: number;
+  /** Nomes de parâmetros de query vistos em URLs descobertas para o mesmo caminho. */
+  parametros: string[];
 }
 
 const EXTENSOES_IGNORADAS =
@@ -110,6 +112,45 @@ export function caminhoExcluido(escopo: Pick<EscopoDaTarefa, 'caminhosExcluidos'
   }
 }
 
+const MAXIMO_DE_SEMENTES = 40;
+
+/** Caminhos comuns de aplicações web, tentados só com GET além dos links encontrados. */
+export const CAMINHOS_COMUNS: readonly string[] = [
+  '/login',
+  '/admin',
+  '/api',
+  '/busca',
+  '/conta',
+  '/produtos',
+  '/uploads/',
+  '/perfil',
+  '/painel',
+];
+
+/** Caminhos concretos (sem curingas) das linhas Allow/Disallow do robots.txt. */
+export function extrairUrlsDoRobots(texto: string | null, origem: string): string[] {
+  if (texto === null) return [];
+  const urls = new Set<string>();
+  for (const achado of texto.matchAll(/^\s*(?:allow|disallow)\s*:\s*(\S+)/gim)) {
+    const caminho = achado[1] ?? '';
+    if (!caminho.startsWith('/') || /[*$]/.test(caminho)) continue;
+    const url = resolver(caminho, origem);
+    if (url !== null) urls.add(url);
+  }
+  return [...urls];
+}
+
+/** URLs das tags `<loc>` de um sitemap.xml. */
+export function extrairUrlsDoSitemap(texto: string | null, origem: string): string[] {
+  if (texto === null || !/<(?:urlset|sitemapindex)\b/i.test(texto)) return [];
+  const urls = new Set<string>();
+  for (const achado of texto.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)) {
+    const url = resolver(decodificar(achado[1] ?? ''), origem);
+    if (url !== null) urls.add(url);
+  }
+  return [...urls];
+}
+
 export interface OpcoesDeDescoberta {
   contexto: ContextoAtivo;
   urlInicial: string;
@@ -133,6 +174,18 @@ export async function descobrirPaginas(opcoes: OpcoesDeDescoberta): Promise<Pagi
   const paginas: PaginaDescoberta[] = [];
   const vistas = new Set<string>([inicial.toString()]);
   const fila: { url: string; profundidade: number }[] = [{ url: inicial.toString(), profundidade: 0 }];
+  const sementes: { url: string; profundidade: number }[] = [];
+  const parametrosPorCaminho = new Map<string, Set<string>>();
+
+  const registrarParametros = (url: string): void => {
+    const alvo = new URL(url);
+    for (const nome of alvo.searchParams.keys()) {
+      const conjunto = parametrosPorCaminho.get(alvo.pathname) ?? new Set<string>();
+      conjunto.add(nome);
+      parametrosPorCaminho.set(alvo.pathname, conjunto);
+    }
+  };
+  registrarParametros(inicial.toString());
 
   const aceitar = (url: string): boolean => {
     const alvo = new URL(url);
@@ -145,17 +198,53 @@ export async function descobrirPaginas(opcoes: OpcoesDeDescoberta): Promise<Pagi
     );
   };
 
-  while (fila.length > 0 && paginas.length < maximo) {
-    const atual = fila.shift();
+  // Sementes extras (robots.txt, sitemap.xml e caminhos comuns): só entram depois dos links da página inicial.
+  const semear = (url: string): void => {
+    if (sementes.length >= MAXIMO_DE_SEMENTES || vistas.has(url) || !aceitar(url)) return;
+    vistas.add(url);
+    registrarParametros(url);
+    sementes.push({ url, profundidade: 1 });
+  };
+  const lerTexto = async (caminho: string): Promise<string | null> => {
+    const resposta = await contexto.enviar({ url: new URL(caminho, inicial.origin).toString() });
+    if (resposta === null || resposta.status < 200 || resposta.status >= 300) return null;
+    return resposta.trechoDoCorpo;
+  };
+  for (const url of extrairUrlsDoRobots(await lerTexto('/robots.txt'), inicial.origin)) semear(url);
+  for (const url of extrairUrlsDoSitemap(await lerTexto('/sitemap.xml'), inicial.origin)) semear(url);
+  for (const caminho of CAMINHOS_COMUNS) semear(new URL(caminho, inicial.origin).toString());
+
+  while (paginas.length < maximo) {
+    const atual = fila.shift() ?? sementes.shift();
     if (atual === undefined) break;
     const resposta = await contexto.enviar({ url: atual.url });
-    if (resposta === null || resposta.status < 200 || resposta.status >= 300 || !ehHtml(resposta)) continue;
+    if (resposta === null) continue;
+    const htmlComSucesso = resposta.status >= 200 && resposta.status < 300 && ehHtml(resposta);
+    if (!htmlComSucesso) {
+      // URL com parâmetros que respondeu (texto, JSON, 5xx...) entra para as sondas de entrada; sem extrair links.
+      if (resposta.status !== 404 && new URL(atual.url).search !== '') {
+        paginas.push({ url: atual.url, metodo: 'GET', status: resposta.status, formularios: [],
+          tamanhoDoCorpo: resposta.trechoDoCorpo.length, parametros: [] });
+      }
+      continue;
+    }
 
     const formularios = extrairFormularios(resposta.trechoDoCorpo, resposta.url);
     paginas.push({ url: atual.url, metodo: 'GET', status: resposta.status,
       formularios,
       tamanhoDoCorpo: resposta.trechoDoCorpo.length,
+      parametros: [],
     });
+    for (const formulario of formularios) {
+      if (formulario.metodo === 'GET') {
+        const destino = new URL(formulario.acao);
+        for (const campo of formulario.campos) {
+          const conjunto = parametrosPorCaminho.get(destino.pathname) ?? new Set<string>();
+          conjunto.add(campo.nome);
+          parametrosPorCaminho.set(destino.pathname, conjunto);
+        }
+      }
+    }
     if (atual.profundidade >= profundidadeMaxima) continue;
 
     const candidatos = [
@@ -165,8 +254,12 @@ export async function descobrirPaginas(opcoes: OpcoesDeDescoberta): Promise<Pagi
     for (const candidato of candidatos) {
       if (vistas.has(candidato) || !aceitar(candidato)) continue;
       vistas.add(candidato);
+      registrarParametros(candidato);
       fila.push({ url: candidato, profundidade: atual.profundidade + 1 });
     }
+  }
+  for (const pagina of paginas) {
+    pagina.parametros = [...(parametrosPorCaminho.get(new URL(pagina.url).pathname) ?? [])];
   }
   return paginas;
 }

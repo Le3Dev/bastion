@@ -39,6 +39,8 @@ export function alvosDeEntrada(
     const url = new URL(pagina.url);
     const campos: Record<string, string> = {};
     for (const [nome, valor] of url.searchParams) campos[nome] = valor;
+    // Parâmetros reais vistos em outras URLs do mesmo caminho também são testados.
+    for (const nome of pagina.parametros) campos[nome] ??= '1';
     url.search = '';
     adicionar({ url: url.toString(), metodo: 'GET', campos });
 
