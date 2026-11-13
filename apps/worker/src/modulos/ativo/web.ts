@@ -625,6 +625,125 @@ export async function sondarErrosDetalhados(
   return constatacoes;
 }
 
+// ---------------------------------------------------------------------------------------------
+// CSRF ausente (apenas inspeção dos formulários descobertos; nada é submetido)
+// ---------------------------------------------------------------------------------------------
+
+const CAMPO_COM_CARA_DE_TOKEN = /csrf|xsrf|token|nonce|authenticity|verification/i;
+const ACAO_DE_BUSCA = /\/(?:busca|buscar|pesquisa|search)\b/i;
+
+export function analisarCsrf(paginas: readonly PaginaDescoberta[], maximo = 3): Constatacao[] {
+  const constatacoes: Constatacao[] = [];
+  const vistas = new Set<string>();
+  for (const pagina of paginas) {
+    for (const formulario of pagina.formularios) {
+      if (formulario.metodo !== 'POST' || formulario.tokenCsrf !== null) continue;
+      if (formulario.campos.some((campo) => campo.tipo === 'password')) continue; // login/troca de senha
+      if (formulario.campos.some((campo) => campo.tipo === 'hidden' && CAMPO_COM_CARA_DE_TOKEN.test(campo.nome))) continue;
+      let acao: URL;
+      try {
+        acao = new URL(formulario.acao);
+      } catch {
+        continue;
+      }
+      const visiveis = formulario.campos.filter((campo) => campo.tipo !== 'hidden');
+      if (ACAO_DE_BUSCA.test(acao.pathname)) continue;
+      if (visiveis.length === 1 && ['text', 'search'].includes(visiveis[0]?.tipo ?? '')) continue;
+      const chave = `${acao.origin}${acao.pathname}`;
+      if (vistas.has(chave)) continue;
+      vistas.add(chave);
+      const nomes = formulario.campos.map((campo) => campo.nome).join(', ');
+      constatacoes.push(
+        construirConstatacao({
+          tipo: 'CSRF_AUSENTE',
+          titulo: `Formulário POST sem token anti-CSRF (${acao.pathname})`,
+          severidade: 'MEDIA',
+          local: `formulario:${acao.pathname}`,
+          descricao:
+            'O formulário altera estado via POST e não traz token anti-CSRF. Um site de terceiros pode induzir o navegador de um usuário autenticado a submetê-lo sem que ele perceba.',
+          requisicao: `Formulário POST ${chave} (inspeção do HTML; nada foi submetido)`,
+          resposta: `Campos: ${trecho(nomes || '(nenhum)', 200)}`,
+          observacao:
+            'Constatação por inspeção do HTML: confirme manualmente, pois a proteção pode existir por cabeçalho personalizado, SameSite=Strict/Lax nos cookies ou verificação de Origin.',
+          correcao:
+            'Inclua um token imprevisível por sessão em cada formulário e valide-o no servidor; combine com cookies SameSite e checagem de Origin.\n\nExpress: use um middleware de CSRF (ex.: csrf-csrf) e renderize <input type="hidden" name="_csrf" value="...">.',
+          owasp: [OWASP.controleDeAcesso],
+        }),
+      );
+      if (constatacoes.length >= maximo) return constatacoes;
+    }
+  }
+  return constatacoes;
+}
+
+// ---------------------------------------------------------------------------------------------
+// SSRF (destino de teste em domínio reservado: nada é realmente buscado)
+// ---------------------------------------------------------------------------------------------
+
+const HOST_DE_TESTE_SSRF = 'bastion-teste.invalid';
+const ERRO_DE_BUSCA =
+  /ENOTFOUND|EAI_AGAIN|getaddrinfo|ECONNREFUSED|Name or service not known|could not resolve|failed to (?:fetch|connect|resolve)|connection (?:refused|error)|unknown host|UnknownHost|nodename nor servname|fetch failed|urlopen error|Max retries exceeded|No address associated/i;
+
+export function analisarSsrf(
+  alvo: AlvoDeEntrada,
+  parametro: string,
+  marcador: string,
+  resposta: RespostaHttp,
+  controle: RespostaHttp | null,
+): Constatacao | null {
+  const corpo = resposta.trechoDoCorpo;
+  if (ERRO_DE_BUSCA.test(controle?.trechoDoCorpo ?? '')) return null;
+  for (const referencia of [HOST_DE_TESTE_SSRF, marcador]) {
+    let posicao = corpo.indexOf(referencia);
+    while (posicao !== -1) {
+      const janela = corpo.slice(Math.max(0, posicao - 200), posicao + referencia.length + 200);
+      const erro = ERRO_DE_BUSCA.exec(janela);
+      if (erro !== null) {
+        return construirConstatacao({
+          tipo: 'SSRF',
+          titulo: `Possível SSRF no parâmetro ${parametro}`,
+          severidade: 'MEDIA',
+          local: `parametro:${new URL(alvo.url).pathname}?${parametro}`,
+          descricao:
+            'O servidor tentou buscar a URL informada no parâmetro (a resposta traz erro de conexão/DNS referente ao destino de teste). Se a busca não for restrita, um atacante pode alcançar serviços internos e metadados de nuvem.',
+          requisicao: descreverEntrada(alvo, parametro, `http://${HOST_DE_TESTE_SSRF}/${marcador}`),
+          resposta: `HTTP ${resposta.status}\n\n…${trecho(janela, 220)}…`,
+          observacao: `A URL usa o domínio reservado .invalid, que nunca resolve; nada foi realmente buscado. O erro "${erro[0]}" indica que o servidor tentou a conexão. Confirme manualmente, sem apontar para hosts internos de terceiros.`,
+          correcao:
+            'Não busque URLs informadas pelo usuário. Se necessário, use lista fixa de domínios, resolva o DNS e bloqueie IPs privados/loopback/link-local, desative redirecionamentos e limite os esquemas a https.',
+          owasp: [OWASP.ssrf],
+        });
+      }
+      posicao = corpo.indexOf(referencia, posicao + referencia.length);
+    }
+  }
+  return null;
+}
+
+export async function sondarSsrf(
+  contexto: ContextoAtivo,
+  paginas: readonly PaginaDescoberta[],
+  opcoes: OpcoesDeEntradas & { maximoDeParametros?: number } = {},
+): Promise<Constatacao[]> {
+  const constatacoes: Constatacao[] = [];
+  let usados = 0;
+  const maximo = opcoes.maximoDeParametros ?? 4;
+  for (const alvo of alvosDeEntrada(paginas, contexto, opcoes.maximoDeAlvos ?? 12)) {
+    for (const parametro of Object.keys(alvo.campos)) {
+      if (usados >= maximo) return constatacoes;
+      if (!PARECE_URL_OU_CAMINHO.test(alvo.campos[parametro] ?? '')) continue;
+      usados += 1;
+      const marcador = novoMarcador();
+      const resposta = await enviarEntrada(contexto, alvo, parametro, `http://${HOST_DE_TESTE_SSRF}/${marcador}`);
+      if (resposta === null || !ERRO_DE_BUSCA.test(resposta.trechoDoCorpo)) continue;
+      const controle = await enviarEntrada(contexto, alvo, parametro, `bastion-teste-controle-${novoMarcador()}`);
+      const constatacao = analisarSsrf(alvo, parametro, marcador, resposta, controle);
+      if (constatacao !== null) constatacoes.push(constatacao);
+    }
+  }
+  return constatacoes;
+}
+
 export interface OpcoesDoModuloWeb {
   contexto: ContextoAtivo;
   urlInicial: string;
@@ -640,5 +759,7 @@ export async function avaliarWeb(opcoes: OpcoesDoModuloWeb): Promise<Constatacao
     ...(await sondarRedirecionamentos(contexto, urlInicial, paginas)),
     ...(await sondarEntradaRefletida(contexto, urlInicial, paginas)),
     ...(await sondarErrosDetalhados(contexto, urlInicial, paginas)),
+    ...analisarCsrf(paginas),
+    ...(await sondarSsrf(contexto, paginas)),
   ];
 }

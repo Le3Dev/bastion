@@ -32,11 +32,13 @@ import {
   type ConversaDeIa,
 } from '../modulos/ativo/ia';
 import {
+  analisarCsrf,
   sondarArquivosExpostos,
   sondarCorsEMetodos,
   sondarEntradaRefletida,
   sondarErrosDetalhados,
   sondarRedirecionamentos,
+  sondarSsrf,
 } from '../modulos/ativo/web';
 import {
   analisarCabecalhos,
@@ -62,7 +64,7 @@ const ETAPAS_PADRAO = [
   'Mapeamento de páginas',
   'Arquivos e configurações expostos',
   'CORS e métodos HTTP',
-  'Entrada refletida e redirecionamentos',
+  'Entrada refletida, redirecionamentos, CSRF e SSRF',
   'Análise e deduplicação',
 ] as const;
 
@@ -332,10 +334,12 @@ export function criarExecutorDeAvaliacao(deps: DependenciasDoExecutor): Executor
         await etapa('CORS e métodos HTTP', false, async () =>
           emitirConstatacoes(await sondarCorsEMetodos(contexto, inicio0)),
         );
-        await etapa('Entrada refletida e redirecionamentos', false, async () => {
+        await etapa('Entrada refletida, redirecionamentos, CSRF e SSRF', false, async () => {
           await emitirConstatacoes(await sondarRedirecionamentos(contexto, inicio0, paginas));
           await emitirConstatacoes(await sondarEntradaRefletida(contexto, inicio0, paginas));
           await emitirConstatacoes(await sondarErrosDetalhados(contexto, inicio0, paginas));
+          await emitirConstatacoes(analisarCsrf(paginas));
+          await emitirConstatacoes(await sondarSsrf(contexto, paginas));
         });
 
         if (tarefa.perfil === 'COMPLETO') {

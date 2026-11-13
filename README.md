@@ -266,6 +266,8 @@ Como os perfis ativos encontram o que testar: a descoberta, só por GET e dentro
 
 Reforços de detecção: o perfil `PADRAO` agora detecta entrada refletida também em contexto de atributo HTML e de string JavaScript, além de arquivos sensíveis expostos e CORS que aceita origem nula. O perfil `COMPLETO` detecta travessia de caminho mesmo com codificação percent-encoding e injeção de SQL com variações de comentário. O alvo de laboratório ganhou as rotas `/perfil` e `/saudacao` (XSS em atributo e em string JS) para provar esses detectores ao vivo.
 
+Novos detectores: os perfis ativos agora também detectam **injeção de comando** (marcador aritmético avaliado pelo alvo), **ausência de proteção anti-CSRF** em formulários que mudam estado e **falsificação de requisição do lado do servidor (SSRF)**. Todos são não destrutivos; para CSRF e SSRF recomenda-se confirmação manual do achado. O alvo de laboratório ganhou as rotas `/ping` (comando simulado, sem shell real), `/transferencia` (formulário sem token) e `/busca-url` (busca no servidor que ecoa host e motivo do erro).
+
 #### Segurança dos perfis ativos
 
 Salvaguardas valem para qualquer avaliação ativa:
