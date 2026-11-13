@@ -103,6 +103,103 @@ describe('descoberta de páginas', () => {
   });
 });
 
+describe('descoberta por fontes extras', () => {
+  async function servidorSemLinks(): Promise<AlvoLocal> {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const caminho = url.pathname;
+      if (caminho === '/') return html(res, '<html><body>Sem links</body></html>');
+      if (caminho === '/robots.txt') {
+        return void res.end('User-agent: *\nDisallow: /restrito/\nAllow: /publico\nDisallow: /*.pdf$\nDisallow: /logout\n');
+      }
+      if (caminho === '/sitemap.xml') {
+        return void res.end(
+          `<?xml version="1.0"?><urlset><url><loc>http://${req.headers.host ?? ''}/mapa?ref=1</loc></url><url><loc>https://externo.exemplo/x</loc></url></urlset>`,
+        );
+      }
+      if (['/restrito/', '/publico', '/mapa', '/login', '/redir'].includes(caminho)) return html(res, `<html>${caminho}</html>`);
+      return html(res, '<h1>Não encontrado</h1>', 404);
+    });
+    alvos.push(alvo);
+    return alvo;
+  }
+
+  it('encontra páginas via robots.txt, sitemap.xml e caminhos comuns, sem sair do host', async () => {
+    const alvo = await servidorSemLinks();
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial: `${alvo.url}/` });
+    const caminhos = paginas.map((p) => new URL(p.url).pathname);
+    expect(caminhos).toEqual(expect.arrayContaining(['/', '/restrito/', '/publico', '/mapa', '/login']));
+    expect(paginas.find((p) => p.url.includes('/mapa'))?.parametros).toEqual(['ref']);
+    expect(alvo.pedidos.some((p) => p.includes('/logout') || p.includes('externo'))).toBe(false);
+  });
+
+  it('não semeia caminhos excluídos e respeita o teto de páginas', async () => {
+    const alvo = await servidorSemLinks();
+    const ambiente = criarAmbiente({ caminhosExcluidos: ['/restrito'] });
+    ambientes.push(ambiente);
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial: `${alvo.url}/`, maximoDePaginas: 3 });
+    expect(paginas).toHaveLength(3);
+    expect(alvo.pedidos.some((p) => p.includes('/restrito'))).toBe(false);
+  });
+
+  it('inclui URLs com parâmetros mesmo não-HTML ou 5xx, mas não rotas não-HTML sem parâmetro', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') {
+        return html(res, '<a href="/api/lista?id=1">j</a><a href="/falha?v=1">f</a><a href="/api/puro">p</a>');
+      }
+      if (url.pathname === '/api/lista') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return void res.end('{"ok":true}');
+      }
+      if (url.pathname === '/falha') {
+        res.writeHead(500, { 'content-type': 'text/plain' });
+        return void res.end('erro');
+      }
+      if (url.pathname === '/api/puro') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return void res.end('{}');
+      }
+      return html(res, 'x', 404);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial: `${alvo.url}/` });
+    const caminhos = paginas.map((p) => new URL(p.url).pathname);
+    expect(caminhos).toEqual(expect.arrayContaining(['/api/lista', '/falha']));
+    expect(caminhos).not.toContain('/api/puro');
+    expect(paginas.find((p) => p.url.includes('/falha'))?.formularios).toEqual([]);
+  });
+
+  it('detecta redirecionamento aberto pelo parâmetro "para" e testa parâmetros reais', async () => {
+    const alvo = await servir((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, '<a href="/redir?para=/inicio">ir</a><a href="/busca?termo=x">b</a>');
+      if (url.pathname === '/redir') {
+        res.writeHead(302, { location: url.searchParams.get('para') ?? '/' });
+        return void res.end();
+      }
+      if (url.pathname === '/busca') return html(res, `<p>${url.searchParams.get('termo') ?? ''}</p>`);
+      if (url.pathname === '/inicio') return html(res, '<p>inicio</p>');
+      return html(res, 'x', 404);
+    });
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const urlInicial = `${alvo.url}/`;
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial });
+    expect(paginas.find((p) => p.url.includes('/busca'))?.parametros).toEqual(['termo']);
+    const constatacoes = await avaliarWeb({ contexto: ambiente.contexto, urlInicial, paginas });
+    const redir = constatacoes.find((c) => c.tipo === 'REDIRECIONAMENTO_ABERTO');
+    expect(redir?.local).toBe('parametro:/redir?para');
+    const reflexo = constatacoes.find((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE');
+    expect(reflexo?.local).toBe('parametro:/busca?termo');
+  });
+});
+
 describe('módulo ativo web (perfil PADRAO)', () => {
   it('encontra as falhas de um alvo vulnerável, com evidência e sem expor segredos', async () => {
     const alvo = await servidorVulneravel();

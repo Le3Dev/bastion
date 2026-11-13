@@ -286,7 +286,14 @@ export const PARAMETROS_DE_REDIRECIONAMENTO = [
   'dest',
   'goto',
   'target',
+  'para',
+  'destino',
+  'url_retorno',
+  'retorno',
+  'redir',
 ] as const;
+
+const PARECE_URL_OU_CAMINHO = /^(?:https?:)?\/\/|^\//i;
 
 export function analisarRedirecionamento(url: string, parametro: string, resposta: RespostaHttp): Constatacao | null {
   if (resposta.status < 300 || resposta.status >= 400) return null;
@@ -403,17 +410,25 @@ export async function sondarRedirecionamentos(
   paginas: readonly PaginaDescoberta[] = [],
 ): Promise<Constatacao[]> {
   const constatacoes: Constatacao[] = [];
-  const candidatos = new Map<string, string>([[new URL(urlInicial).pathname, urlInicial]]);
+  const candidatos = new Map<string, { base: string; reais: Set<string> }>([
+    [new URL(urlInicial).pathname, { base: urlInicial, reais: new Set() }],
+  ]);
   for (const pagina of paginas) {
     const url = new URL(pagina.url);
+    // Parâmetros cujo valor atual parece URL ou caminho são candidatos a destino de redirecionamento.
+    const reais = [...url.searchParams].filter(([, valor]) => PARECE_URL_OU_CAMINHO.test(valor)).map(([nome]) => nome);
     const temParametro = PARAMETROS_DE_REDIRECIONAMENTO.some((nome) => url.searchParams.has(nome));
-    if ((temParametro || /login|signin|redirect|out|go|link/i.test(url.pathname)) && candidatos.size < 4) {
+    const existente = candidatos.get(url.pathname);
+    if (existente !== undefined) {
+      for (const nome of reais) existente.reais.add(nome);
+    } else if ((temParametro || reais.length > 0 || /login|signin|redirect|redir|out|go|link/i.test(url.pathname)) && candidatos.size < 6) {
       url.search = '';
-      candidatos.set(url.pathname, url.toString());
+      candidatos.set(url.pathname, { base: url.toString(), reais: new Set(reais) });
     }
   }
-  for (const base of candidatos.values()) {
-    for (const parametro of PARAMETROS_DE_REDIRECIONAMENTO) {
+  for (const { base, reais } of candidatos.values()) {
+    const parametros = [...new Set<string>([...reais, ...PARAMETROS_DE_REDIRECIONAMENTO])];
+    for (const parametro of parametros) {
       const url = comParametro(base, parametro, `${ORIGEM_DE_TESTE}/redirecionamento`);
       const resposta = await contexto.enviar({ url, naoSeguirRedirecionamentos: true });
       const constatacao = resposta === null ? null : analisarRedirecionamento(url, parametro, resposta);
