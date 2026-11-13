@@ -262,6 +262,8 @@ Em texto: web ou CI chamam a API; a API enfileira a tarefa; o worker consome, pa
 
 Como os perfis ativos chegam ao worker: ao solicitar a avaliação, a API confere a autorização e o perfil, monta o escopo (métodos permitidos, caminhos excluídos, teto de requisições, permissão de criação de dados) e, no `COMPLETO`, inclui a credencial de teste decifrada; no `IA`, o conector decifrado. Esses segredos seguem só pela fila e nunca vão para log, auditoria, DTO ou relatório.
 
+Como os perfis ativos encontram o que testar: a descoberta, só por GET e dentro do escopo, parte da URL do sistema, segue links e formulários do mesmo host e também lê `robots.txt` (caminhos concretos de `Allow`/`Disallow`), `sitemap.xml` e uma lista curta de caminhos comuns (`/login`, `/admin`, `/api`, `/busca`, `/conta`, `/produtos`, `/uploads/`, `/perfil`, `/painel`). Ela respeita os caminhos excluídos, nunca segue links com cara de sair ou apagar, tem teto de páginas e conta no teto de requisições do perfil. Os nomes de parâmetros reais vistos nas URLs, inclusive em respostas não-HTML (texto, JSON ou erro), alimentam as sondas de entrada; o redirecionamento aberto também testa nomes em português (`para`, `destino`, `retorno`...) e qualquer parâmetro cujo valor pareça URL ou caminho. No perfil `IA`, o vazamento de dados é detectado pelas `frasesSigilosas` do conector, sem diferenciar maiúsculas, além dos padrões genéricos (canário, CPF válido, credenciais).
+
 #### Segurança dos perfis ativos
 
 Salvaguardas valem para qualquer avaliação ativa:
