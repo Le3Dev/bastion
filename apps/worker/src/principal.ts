@@ -8,6 +8,7 @@ import { criarClienteHttp } from './guardiao-de-escopo/cliente-http';
 import { LimitadorDeTaxa } from './guardiao-de-escopo/limitador-de-taxa';
 import { sondarTls } from './guardiao-de-escopo/sonda-tls';
 import { PublicadorDeResultados } from './resultados';
+import { iniciarServidorDeSaude } from './saude';
 import { criarEntregadorDeWebhook } from './tarefas/entregar-webhook';
 import { criarExecutorDeAvaliacao } from './tarefas/executar-avaliacao';
 import { criarVerificadorDePropriedade } from './tarefas/verificar-propriedade';
@@ -87,6 +88,9 @@ async function iniciar(config: ConfigDoWorker): Promise<void> {
     );
   }
 
+  const servidorDeSaude = await iniciarServidorDeSaude(config.portaDeSaude);
+  registrar(`Endpoint de saúde em /saude na porta ${config.portaDeSaude}.`);
+
   registrar(
     `Worker iniciado: avaliações (concorrência ${config.concorrenciaDeAvaliacoes}), verificações e webhooks.`,
   );
@@ -97,6 +101,7 @@ async function iniciar(config: ConfigDoWorker): Promise<void> {
     encerrando = true;
     registrar(`${sinal} recebido; encerrando com graça.`);
     try {
+      await servidorDeSaude.close();
       await Promise.all(workers.map((worker) => worker.close()));
       await filaDeResultados.close();
       await clienteHttp.fechar();

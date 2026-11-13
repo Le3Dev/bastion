@@ -9,6 +9,7 @@ describe('lerConfig', () => {
       permitirRedesPrivadas: false,
       requisicoesPorSegundo: 5,
       concorrenciaDeAvaliacoes: 2,
+      portaDeSaude: 3334,
     });
     expect(avisar).not.toHaveBeenCalled();
   });

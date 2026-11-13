@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: bastion
+
+# O Secret real "bastion-secrets" e criado FORA do git (veja
+# bastion-secrets.exemplo.yaml, que de proposito nao esta nesta lista).
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployments.yaml
+  - services.yaml
+  - ingress.yaml
+  - networkpolicies.yaml
+  - job-migracao.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bastion
+    includeSelectors: false
+
+# Tag "latest" por padrao; os overlays fixam o sha publicado pelo workflow.
+images:
+  - name: ghcr.io/le3dev/bastion-web
+    newTag: latest
+  - name: ghcr.io/le3dev/bastion-api
+    newTag: latest
+  - name: ghcr.io/le3dev/bastion-worker
+    newTag: latest

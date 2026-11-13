@@ -1,0 +1,17 @@
+# Valores NAO secretos. Segredos ficam no Secret "bastion-secrets" (criado fora do git).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bastion-config
+data:
+  API_PORTA: "3333"
+  # Origem do web (CORS e cookies). Sobrescrita por overlay.
+  API_ORIGEM_WEB: "https://app.exemplo.com.br"
+  SESSAO_COOKIE_SEGURO: "true"
+  SESSAO_DURACAO_HORAS: "12"
+  EMAIL_REMETENTE: "Bastion <nao-responda@exemplo.com.br>"
+  WORKER_PORTA: "3334"
+  WORKER_CONCORRENCIA_AVALIACOES: "2"
+  GUARDIAO_REQUISICOES_POR_SEGUNDO: "5"
+  # Deve ser "false" fora de desenvolvimento (libera redes privadas e loopback).
+  GUARDIAO_PERMITIR_REDES_PRIVADAS: "false"

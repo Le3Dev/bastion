@@ -1,0 +1,148 @@
+# Isolamento de rede entre os planos (ADR 2 e 21).
+# ATENCAO: NetworkPolicy so e aplicada se o CNI do cluster a suporta (Calico,
+# Cilium, etc.). Em CNIs sem suporte (ex.: flannel puro) estes objetos sao
+# aceitos mas IGNORADOS, sem erro algum.
+#
+# Limite conhecido: NetworkPolicy nao filtra por FQDN. Banco, Redis, S3 e SMTP
+# sao gerenciados (fora do cluster); por isso o bloqueio fino do worker a eles
+# depende de regra de rede do provedor (security group/firewall/mesh).
+# Estas politicas cobrem o trafego INTRA-CLUSTER.
+---
+# 1. Nega todo ingress e egress por padrao no namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. DNS liberado para todos os pods (kube-dns/CoreDNS).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# 3. web: entra so do ingress-controller; sai so para a API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-web
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: 3000 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: bastion-api
+      ports:
+        - { protocol: TCP, port: 3333 }
+---
+# 4. api: entra do ingress-controller e do web; sai para os servicos
+#    gerenciados (Postgres, Redis, S3/HTTPS, SMTP) fora do cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: bastion-web
+      ports:
+        - { protocol: TCP, port: 3333 }
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - { protocol: TCP, port: 5432 }   # Postgres
+        - { protocol: TCP, port: 6379 }   # Redis
+        - { protocol: TCP, port: 6380 }   # Redis TLS
+        - { protocol: TCP, port: 443 }    # S3
+        - { protocol: TCP, port: 25 }     # SMTP
+        - { protocol: TCP, port: 465 }
+        - { protocol: TCP, port: 587 }
+---
+# 5. worker: sem ingress (as probes do kubelet nao sao filtradas por
+#    NetworkPolicy na maioria dos CNIs). Egress so para a internet publica:
+#    ranges privados, loopback e link-local ficam de fora, o que impede alcancar
+#    qualquer Pod/Service do cluster (CIDRs de pods costumam ser privados).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-worker
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8443 }
+---
+# 6. worker -> Redis gerenciado. Se o Redis tem IP privado (VPC), a regra 5 o
+#    bloqueia; ajuste o CIDR abaixo por patch no overlay para o /32 real do
+#    Redis. O valor atual e so um PLACEHOLDER (faixa de documentacao).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-redis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bastion-worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 203.0.113.10/32
+      ports:
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 6380 }

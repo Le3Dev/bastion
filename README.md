@@ -35,6 +35,8 @@ Para continuar o desenvolvimento em outra máquina, veja a seção 9.2.
 
 O protótipo da Fase 1 (dados fictícios em memória) foi removido (ADR 16): o web agora depende da API, do banco e do worker.
 
+**Build de produção.** `corepack pnpm -r build` gera `apps/api/dist` e `apps/worker/dist` (tsup) e o `.next/standalone` do web (`output: 'standalone'`). Os starts de produção são `node apps/api/dist/servidor.js`, `node apps/worker/dist/principal.js` e o `server.js` do standalone do web. A migração em produção roda com `node apps/api/dist/migrar.js`. O deploy em Kubernetes está na seção 4.6.
+
 ### Plataforma (Fase 2)
 
 Pré-requisito extra: **Docker Desktop** em execução.
@@ -255,6 +257,8 @@ Em texto: web ou CI chamam a API; a API enfileira a tarefa; o worker consome, pa
 | 17 | Pentest autorizado exige ir além da análise passiva, sem risco para o alvo | **Perfis de avaliação ativos** `PADRAO`, `COMPLETO` e `IA`, com sondas não destrutivas. Exigem autorização por escrito do dono do sistema, consentimento explícito para criar dados, freios por perfil e disjuntor, e tudo é auditado | Mais poder, mais responsabilidade: sem autorização registrada o perfil não inicia. Avaliações ativas são mais lentas e geram mais tráfego no alvo |
 | 18 | Os módulos ativos precisam de um alvo para testes, mas apontá-los a sistemas reais seria arriscado | **Alvo vulnerável de laboratório** (`infra/alvo-de-teste/app-vulneravel`): Node puro, sem dependências, tudo simulado em memória, serviço `alvo-vulneravel` na porta 8081 | Falhas propositais: é fixture local de dev e testes, **jamais** vai para produção nem fica exposto à internet |
 | 19 | Credenciais de teste e cabeçalhos do conector de IA são segredos do cliente guardados no banco | Cifragem **AES-256-GCM** na API (`compartilhado/cifragem.ts`), formato `v1.<iv>.<tag>.<texto>` em base64url, chave em `CHAVE_DE_CIFRAGEM` (32 bytes). O domínio guarda só o valor opaco; a API decifra apenas ao montar a tarefa do worker, e a API nunca devolve esses segredos | Perder ou trocar a chave exige recadastrar credenciais e conectores. Em produção a variável é obrigatória; em dev há uma chave fixa pública |
+| 20 | Precisamos publicar a plataforma em produção de forma reproduzível, sem operar banco, fila e armazenamento dentro do cluster | **Kubernetes com Kustomize** (`infra/k8s/base` + overlays `staging` e `producao`) e **serviços gerenciados**: Postgres, Redis e S3 ficam fora do cluster, que roda só web, API e worker. Três imagens no GHCR, publicadas por `.github/workflows/imagens.yml`. Conexões por Secret criado fora do git (só há o modelo `bastion-secrets.exemplo.yaml`) | Menos peças para operar e backups/alta disponibilidade ficam com o provedor. Em troca, depende de rede entre cluster e serviços gerenciados e de um Secret real por ambiente. Veja a seção 4.6 |
+| 21 | A ADR 2 exige que um worker comprometido não alcance dados, mas no cluster todos os Pods compartilham a rede | **NetworkPolicies** com default-deny: web só fala com a API; API fala com o ingress, o web e os serviços gerenciados; worker só sai para a internet pública e para o Redis, sem ingresso nem acesso aos Pods do cluster | Realiza a ADR 2 dentro do cluster. Limites: NetworkPolicy só vale em CNIs que a suportam (em outros é aceita e ignorada, sem erro) e não filtra por FQDN, então barrar o worker no banco gerenciado depende de firewall ou regra de rede do provedor. O IP do Redis precisa ser ajustado por patch no overlay |
 
 Como os perfis ativos chegam ao worker: ao solicitar a avaliação, a API confere a autorização e o perfil, monta o escopo (métodos permitidos, caminhos excluídos, teto de requisições, permissão de criação de dados) e, no `COMPLETO`, inclui a credencial de teste decifrada; no `IA`, o conector decifrado. Esses segredos seguem só pela fila e nunca vão para log, auditoria, DTO ou relatório.
 
@@ -270,6 +274,17 @@ Salvaguardas valem para qualquer avaliação ativa:
 - **Disjuntor:** erros ou sinais de degradação do alvo interrompem a avaliação.
 - **Autorização por escrito obrigatória:** registrada antes de iniciar, e tudo fica na auditoria.
 - **Alvo de laboratório:** `alvo-vulneravel` (porta 8081) é inseguro de propósito, só para dev e testes; nunca em produção.
+
+### 4.6 Deploy (Kubernetes)
+
+- **Imagens:** três imagens no GHCR (`ghcr.io/le3dev/bastion-web`, `bastion-api` e `bastion-worker`), a partir de `infra/docker/Dockerfile.{web,api,worker}`, construídas e publicadas pelo workflow `.github/workflows/imagens.yml` (push na `main` e tags `v*`). A imagem da API inclui o Chromium, usado no PDF (ADR 13).
+- **Kustomize:** `infra/k8s/base` mais `overlays/staging` e `overlays/producao`. O overlay fixa o namespace, as réplicas, os hosts do Ingress e `GUARDIAO_PERMITIR_REDES_PRIVADAS=false`. Para conferir o que será aplicado: `kubectl kustomize infra/k8s/overlays/producao`.
+- **Serviços gerenciados:** Postgres, Redis e S3 ficam **fora** do cluster (RDS/Cloud SQL, ElastiCache/Memorystore, S3); o cluster roda só web, API e worker. As conexões vêm por Secret (`bastion-secrets`); o repositório traz só o modelo `infra/k8s/base/bastion-secrets.exemplo.yaml`, e o Secret real é criado fora do git.
+- **Ingress e TLS:** ingress-nginx com cert-manager (`ClusterIssuer` `letsencrypt-prod`); hosts `app.` (web) e `api.` (API).
+- **Job de migração:** `job-migracao.yaml` roda `node apps/api/dist/migrar.js` e deve concluir antes do rollout da API.
+- **Isolamento de rede (realiza a ADR 2, ver ADR 21):** `networkpolicies.yaml` aplica default-deny. O web só fala com a API; a API fala com o ingress, o web e os serviços gerenciados; o worker só sai para a internet pública e para o Redis, sem acesso aos Pods do cluster e sem ingresso. Limitações: NetworkPolicy só é aplicada por CNIs que a suportam e não filtra por FQDN; barrar o worker no banco gerenciado depende de firewall ou regra de rede do provedor.
+- **Ordem do deploy:** 1) criar os Secrets reais; 2) `kubectl apply -k infra/k8s/overlays/producao`; 3) esperar o Job de migração concluir; 4) rollout da API e do restante.
+- **Limitação conhecida (ambiente):** atrás de proxy com inspeção de TLS corporativa, o `docker build` da imagem da API pode falhar ao baixar o Chromium (`SELF_SIGNED_CERT_IN_CHAIN`); em CI ou nuvem sem interceptação o build conclui. As imagens do worker e do web foram construídas e validadas localmente.
 
 ## 5. Escopo do MVP
 

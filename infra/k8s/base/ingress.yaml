@@ -1,0 +1,39 @@
+# Hosts de exemplo; os reais sao trocados por patch em cada overlay.
+# Requer ingress-nginx e cert-manager (ClusterIssuer "letsencrypt-prod").
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bastion
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"  # SSE (eventos ao vivo)
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - app.exemplo.com.br
+        - api.exemplo.com.br
+      secretName: bastion-tls
+  rules:
+    - host: app.exemplo.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 3000
+    - host: api.exemplo.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3333
