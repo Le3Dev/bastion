@@ -1,6 +1,12 @@
 "use client";
 
-import type { CorpoDeConectorDeIa, CorpoDeCredencialDeTeste, SistemaDto } from "@bastion/contratos";
+import type {
+  CorpoDeConectorDeIa,
+  CorpoDeCredencialDeTeste,
+  InstrucoesDeVerificacaoDto,
+  MetodoDeVerificacao,
+  SistemaDto,
+} from "@bastion/contratos";
 import { useState, type FormEvent } from "react";
 import { mensagemDoErro } from "@/api/cliente";
 import { TEXTO_SEM_PERMISSAO } from "@/api/sessao";
@@ -9,8 +15,11 @@ import {
   definirCredencialDeTeste,
   removerConectorDeIa,
   removerCredencialDeTeste,
+  trocarMetodo,
 } from "@/api/sistemas";
+import { metodosDeVerificacaoDisponiveis, rotuloDoMetodoDeVerificacao } from "@/apresentacao/rotulos";
 import { Alerta } from "@/componentes/Alerta";
+import { InstrucoesDeVerificacao } from "./InstrucoesDeVerificacao";
 
 interface Propriedades {
   sistema: SistemaDto;
@@ -51,6 +60,10 @@ export const ConfiguracaoDoSistema = ({ sistema, podeGerenciar, aoAlterar }: Pro
   const [modeloDoCorpo, setModeloDoCorpo] = useState('{"mensagem": "{{mensagem}}"}');
   const [caminhoDaResposta, setCaminhoDaResposta] = useState(sistema.conectorDeIa.caminhoDaResposta ?? "");
   const [frases, setFrases] = useState("");
+
+  // Método de verificação
+  const [metodo, setMetodo] = useState<MetodoDeVerificacao>("DNS_TXT");
+  const [novasInstrucoes, setNovasInstrucoes] = useState<InstrucoesDeVerificacaoDto | null>(null);
 
   const executar = async (acao: () => Promise<unknown>, sucesso: string): Promise<boolean> => {
     setMensagem(null);
@@ -301,6 +314,44 @@ export const ConfiguracaoDoSistema = ({ sistema, podeGerenciar, aoAlterar }: Pro
           </form>
         </section>
       ) : null}
+
+      <section className="pilha" aria-label="Método de verificação">
+        <h3 className="card-titulo">Trocar método de verificação</h3>
+        <div className="linha">
+          <select
+            className="input"
+            aria-label="Novo método de verificação"
+            value={metodo}
+            onChange={(e) => setMetodo(e.target.value as MetodoDeVerificacao)}
+          >
+            {metodosDeVerificacaoDisponiveis.map((m) => (
+              <option key={m} value={m}>
+                {rotuloDoMetodoDeVerificacao(m)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={desabilitado}
+            title={dica}
+            onClick={() =>
+              void executar(async () => {
+                setNovasInstrucoes(await trocarMetodo(id, metodo));
+              }, "Método trocado. A verificação voltou para Pendente.")
+            }
+          >
+            Trocar método
+          </button>
+        </div>
+        {!podeGerenciar ? <span className="hint">{TEXTO_SEM_PERMISSAO}</span> : null}
+        {novasInstrucoes ? (
+          <>
+            <Alerta tipo="warning">É preciso verificar a propriedade de novo com o novo método.</Alerta>
+            <InstrucoesDeVerificacao instrucoes={novasInstrucoes} />
+          </>
+        ) : null}
+      </section>
 
       <span className="hint">
         A permissão de criar registros de teste (marcados com o prefixo bastion-teste-) é escolhida ao iniciar a avaliação Completo.

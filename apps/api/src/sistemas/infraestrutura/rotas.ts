@@ -2,6 +2,7 @@ import {
   CorpoDeCadastroDeSistema,
   CorpoDeConectorDeIa,
   CorpoDeCredencialDeTeste,
+  CorpoDeTrocaDeMetodo,
   CorpoDeVerificacao,
   InstrucoesDeVerificacaoDto,
   ParametroId,
@@ -21,9 +22,19 @@ export const rotasDeSistemas =
       '/v1/sistemas',
       {
         preHandler: exigirPermissao('LER'),
-        schema: { response: { 200: z.object({ itens: z.array(SistemaDto) }) } },
+        schema: {
+          querystring: z.object({
+            incluirArquivados: z
+              .enum(['true', 'false'])
+              .default('false')
+              .transform((valor) => valor === 'true'),
+          }),
+          response: { 200: z.object({ itens: z.array(SistemaDto) }) },
+        },
       },
-      async (request) => ({ itens: await sistemas.listar(contextoDe(request)) }),
+      async (request) => ({
+        itens: await sistemas.listar(contextoDe(request), request.query.incluirArquivados),
+      }),
     );
 
     app.post(
@@ -94,22 +105,27 @@ export const rotasDeSistemas =
       async (request) => sistemas.removerConectorDeIa(contextoDe(request), request.params.id),
     );
 
-    app.patch(
-      '/v1/sistemas/:id/consentimento-de-dados',
+    app.post(
+      '/v1/sistemas/:id/arquivar',
       {
         preHandler: exigirPermissao('CADASTRAR_SISTEMA'),
+        schema: { params: ParametroId, response: { 200: SistemaDto } },
+      },
+      async (request) => sistemas.arquivar(contextoDe(request), request.params.id),
+    );
+
+    app.patch(
+      '/v1/sistemas/:id/metodo',
+      {
+        preHandler: exigirPermissao('VERIFICAR_SISTEMA'),
         schema: {
           params: ParametroId,
-          body: z.object({ permitir: z.boolean() }),
-          response: { 200: SistemaDto },
+          body: CorpoDeTrocaDeMetodo,
+          response: { 200: InstrucoesDeVerificacaoDto },
         },
       },
       async (request) =>
-        sistemas.definirConsentimentoDeDados(
-          contextoDe(request),
-          request.params.id,
-          request.body.permitir,
-        ),
+        sistemas.trocarMetodo(contextoDe(request), request.params.id, request.body.metodo),
     );
 
     app.post(

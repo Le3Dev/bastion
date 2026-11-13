@@ -4,13 +4,14 @@ import type { ContextoDaRequisicao } from '../../compartilhado/autenticacao/cont
 import { emContextoDaOrganizacao, type Banco } from '../../compartilhado/banco/conexao';
 import { avaliacoes } from '../../compartilhado/banco/esquema';
 import type { Relogio } from '../../compartilhado/relogio';
+import { LIMITES_DO_PLANO } from '../dominio/PoliticaDeLimitesDoPlano';
 import { RepositorioDeSistemas } from '../../sistemas/infraestrutura/RepositorioDeSistemas';
 import { RepositorioDeOrganizacoes } from '../infraestrutura/RepositorioDeOrganizacoes';
 
 /** Plano único do MVP: "Profissional". */
 export const PLANO_PROFISSIONAL = {
   nome: 'Profissional',
-  limites: { sistemas: 10, avaliacoesPorMes: 100, membros: 10 },
+  limites: LIMITES_DO_PLANO,
 } as const;
 
 export class ServicoDePlano {
@@ -40,7 +41,7 @@ export class ServicoDePlano {
         nome: PLANO_PROFISSIONAL.nome,
         limites: { ...PLANO_PROFISSIONAL.limites },
         uso: {
-          sistemas: await this.sistemas.contar(tx, contexto.organizacaoId),
+          sistemas: await this.sistemas.contarAtivos(tx, contexto.organizacaoId),
           avaliacoesNoMes: avaliacoesDoMes.length,
           membros: await this.organizacoes.contarMembros(tx, contexto.organizacaoId),
         },

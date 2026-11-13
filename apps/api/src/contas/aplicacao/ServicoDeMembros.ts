@@ -17,7 +17,9 @@ import {
 import type { Config } from '../../compartilhado/config';
 import { ErroDeAplicacao, conflito, naoEncontrado } from '../../compartilhado/erros';
 import { registrarNoOutbox } from '../../compartilhado/outbox/outbox';
+import { montarEmailDeConvite, type ServicoDeEmail } from '../../compartilhado/email/email';
 import type { Relogio } from '../../compartilhado/relogio';
+import { PoliticaDeLimitesDoPlano } from '../dominio/PoliticaDeLimitesDoPlano';
 import type { Membro } from '../dominio/Membro';
 import type { Organizacao } from '../dominio/Organizacao';
 import { Usuario } from '../dominio/Usuario';
@@ -47,6 +49,7 @@ export class ServicoDeMembros {
     private readonly config: Config,
     private readonly relogio: Relogio,
     private readonly auditoria: ServicoDeAuditoria,
+    private readonly email: ServicoDeEmail,
     private readonly organizacoes = new RepositorioDeOrganizacoes(),
     private readonly usuarios = new RepositorioDeUsuarios(),
     private readonly sessoes = new RepositorioDeSessoes(),
@@ -68,7 +71,10 @@ export class ServicoDeMembros {
     const token = gerarTokenDeConvite(contexto.organizacaoId);
     const separado = separarTokenDeConvite(token);
     if (!separado) throw new Error('Falha ao gerar o token do convite.');
-    return emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {
+    const convite = await emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {
+      PoliticaDeLimitesDoPlano.exigirPodeConvidarMembro(
+        await this.organizacoes.contarMembros(tx, contexto.organizacaoId),
+      );
       const organizacao = await this.exigirOrganizacao(tx, contexto.organizacaoId);
       const membro = organizacao.convidarMembro(
         { membroId: gerarIdentificador(), email: corpo.email, papel: corpo.papel },
@@ -84,8 +90,29 @@ export class ServicoDeMembros {
         detalhe: { membroId: membro.id, papel: membro.papel },
       });
       await registrarNoOutbox(tx, organizacao.puxarEventos());
-      return { membro: paraMembroDto(membro), tokenDoConvite: token };
+      return { resposta: { membro: paraMembroDto(membro), tokenDoConvite: token }, nomeDaOrganizacao: organizacao.nome };
     });
+    await this.enviarEmailDeConvite(convite.resposta, convite.nomeDaOrganizacao, token);
+    return convite.resposta;
+  }
+
+  /** Melhor esforço, só depois do commit: falha no envio nunca derruba o convite (o token segue na resposta). */
+  private async enviarEmailDeConvite(
+    resposta: RespostaDeConvite,
+    nomeDaOrganizacao: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      const linkDoConvite = `${this.config.origemDaWeb}/convite?token=${token}`;
+      const mensagem = montarEmailDeConvite({
+        nomeDaOrganizacao,
+        papel: resposta.membro.papel,
+        linkDoConvite,
+      });
+      await this.email.enviar({ para: resposta.membro.email, ...mensagem });
+    } catch (erro) {
+      console.error('Falha ao enviar o e-mail do convite.', erro);
+    }
   }
 
   /** Aceita o convite: cria o usuário se ele não existir e já inicia a sessão. */

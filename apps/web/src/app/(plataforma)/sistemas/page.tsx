@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 import { mensagemDoErro } from "@/api/cliente";
 import { TEXTO_SEM_PERMISSAO, useSessao } from "@/api/sessao";
-import { listarSistemas, verificarPropriedade } from "@/api/sistemas";
+import { arquivarSistema, listarSistemas, verificarPropriedade } from "@/api/sistemas";
 import { useConsulta } from "@/api/useConsulta";
 import { Alerta } from "@/componentes/Alerta";
 import { CabecalhoDaPagina } from "@/componentes/CabecalhoDaPagina";
@@ -13,6 +13,7 @@ import { NotaDeSeguranca } from "@/componentes/NotaDeSeguranca";
 import { SeloDeEstado } from "@/componentes/SeloDeEstado";
 import { formatarData } from "@/apresentacao/formatacao";
 import { rotuloDoTipoDeSistema } from "@/apresentacao/rotulos";
+import { BotaoDeConfirmacao } from "../integracoes/_componentes/BotaoDeConfirmacao";
 import { ConfiguracaoDoSistema } from "./_componentes/ConfiguracaoDoSistema";
 import { InstrucoesDoSistema } from "./_componentes/InstrucoesDoSistema";
 
@@ -29,6 +30,7 @@ const PaginaDeSistemas = () => {
   const [configurando, setConfigurando] = useState<string[]>([]);
   const [verificando, setVerificando] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<Mensagem | null>(null);
+  const [mostrarArquivados, setMostrarArquivados] = useState(false);
 
   const alternar = (id: string): void => {
     setExpandidos((atual) => (atual.includes(id) ? atual.filter((i) => i !== id) : [...atual, id]));
@@ -56,7 +58,19 @@ const PaginaDeSistemas = () => {
     }
   };
 
-  const sistemas = dados ?? [];
+  const arquivar = async (id: string, nome: string): Promise<void> => {
+    setMensagem(null);
+    try {
+      await arquivarSistema(id);
+      setMensagem({ tipo: "success", texto: `Sistema "${nome}" arquivado.` });
+      recarregar();
+    } catch (e) {
+      setMensagem({ tipo: "error", texto: `${nome}: ${mensagemDoErro(e)}` });
+    }
+  };
+
+  const todos = dados ?? [];
+  const sistemas = mostrarArquivados ? todos : todos.filter((s) => !s.arquivado);
 
   return (
     <div className="page-wide pilha">
@@ -82,6 +96,16 @@ const PaginaDeSistemas = () => {
 
       <div aria-live="polite">{mensagem ? <Alerta tipo={mensagem.tipo}>{mensagem.texto}</Alerta> : null}</div>
       {erro ? <Alerta tipo="error">{erro}</Alerta> : null}
+
+      <label className="linha" htmlFor="mostrar-arquivados">
+        <input
+          id="mostrar-arquivados"
+          type="checkbox"
+          checked={mostrarArquivados}
+          onChange={(e) => setMostrarArquivados(e.target.checked)}
+        />
+        Mostrar arquivados
+      </label>
 
       <div className="card">
         {carregando && dados === null ? (
@@ -121,7 +145,9 @@ const PaginaDeSistemas = () => {
                 return (
                   <Fragment key={s.id}>
                     <tr>
-                      <td>{s.nome}</td>
+                      <td>
+                        {s.nome} {s.arquivado ? <span className="tag tag-neutra">Arquivado</span> : null}
+                      </td>
                       <td>{rotuloDoTipoDeSistema(s.tipo)}</td>
                       <td className="mono">{s.urlDeHomologacao}</td>
                       <td>
@@ -175,6 +201,14 @@ const PaginaDeSistemas = () => {
                           >
                             {configurando.includes(s.id) ? "Ocultar configuração" : "Configurar testes"}
                           </button>
+                          {s.arquivado ? null : (
+                            <BotaoDeConfirmacao
+                              rotulo="Arquivar"
+                              desabilitado={!podeGerenciar}
+                              titulo={podeGerenciar ? undefined : TEXTO_SEM_PERMISSAO}
+                              aoConfirmar={() => void arquivar(s.id, s.nome)}
+                            />
+                          )}
                         </div>
                         {emVerificacao ? (
                           <span className="hint">Consultando o ambiente; pode levar até 20 segundos.</span>

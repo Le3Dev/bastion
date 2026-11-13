@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Transacao } from '../../compartilhado/banco/conexao';
 import { sistemas } from '../../compartilhado/banco/esquema';
 import { Sistema } from '../dominio/Sistema';
@@ -25,7 +25,7 @@ const paraAgregado = (linha: LinhaDeSistema): Sistema =>
     criadoEm: linha.criadoEm,
     credencialDeTeste: linha.credencialDeTeste,
     conectorDeIa: linha.conectorDeIa,
-    permitirCriacaoDeDadosDeTeste: linha.permitirCriacaoDeDadosDeTeste,
+    arquivadoEm: linha.arquivadoEm,
   });
 
 export class RepositorioDeSistemas {
@@ -66,7 +66,7 @@ export class RepositorioDeSistemas {
         conectorDeIa: dados.conectorDeIa
           ? { ...dados.conectorDeIa, frasesSigilosas: [...dados.conectorDeIa.frasesSigilosas] }
           : null,
-        permitirCriacaoDeDadosDeTeste: dados.permitirCriacaoDeDadosDeTeste ?? false,
+        arquivadoEm: dados.arquivadoEm ?? null,
       })
       .where(and(eq(sistemas.id, dados.id), eq(sistemas.organizacaoId, dados.organizacaoId)));
   }
@@ -86,19 +86,28 @@ export class RepositorioDeSistemas {
     return linha ? paraAgregado(linha) : null;
   }
 
-  async contar(tx: Transacao, organizacaoId: string): Promise<number> {
+  /** Conta só os sistemas NÃO arquivados (os que entram no limite do plano). */
+  async contarAtivos(tx: Transacao, organizacaoId: string): Promise<number> {
     const linhas = await tx
       .select({ id: sistemas.id })
       .from(sistemas)
-      .where(eq(sistemas.organizacaoId, organizacaoId));
+      .where(and(eq(sistemas.organizacaoId, organizacaoId), isNull(sistemas.arquivadoEm)));
     return linhas.length;
   }
 
-  async listar(tx: Transacao, organizacaoId: string): Promise<Sistema[]> {
+  async listar(
+    tx: Transacao,
+    organizacaoId: string,
+    incluirArquivados = false,
+  ): Promise<Sistema[]> {
     const linhas = await tx
       .select()
       .from(sistemas)
-      .where(eq(sistemas.organizacaoId, organizacaoId))
+      .where(
+        incluirArquivados
+          ? eq(sistemas.organizacaoId, organizacaoId)
+          : and(eq(sistemas.organizacaoId, organizacaoId), isNull(sistemas.arquivadoEm)),
+      )
       .orderBy(desc(sistemas.criadoEm));
     return linhas.map(paraAgregado);
   }

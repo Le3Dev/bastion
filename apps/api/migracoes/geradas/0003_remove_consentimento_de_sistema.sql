@@ -1,0 +1,1 @@
+ALTER TABLE "sistemas" DROP COLUMN "permitir_criacao_de_dados_de_teste";

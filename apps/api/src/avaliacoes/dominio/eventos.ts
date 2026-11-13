@@ -1,7 +1,7 @@
 import type { EventoDeDominio, Identificador } from '@bastion/dominio-compartilhado';
 import type { PerfilDeAvaliacao } from './PerfilDeAvaliacao';
 
-export type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI';
+export type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI' | 'AGENDA';
 
 export type AvaliacaoSolicitada = EventoDeDominio<
   'AvaliacaoSolicitada',

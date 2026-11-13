@@ -397,3 +397,46 @@ describe('webhooks e outbox', () => {
     expect(desativar.json()).toMatchObject({ ativo: false });
   });
 });
+
+describe('e-mail do convite e limite de membros', () => {
+  it('envia o e-mail com o link e ainda devolve o token do convite', async () => {
+    const { app, email } = ambiente;
+    email.enviadas.length = 0;
+    const { cookie } = await cadastrarOrganizacaoDeTeste(app, 'email');
+    const resposta = await app.inject({
+      method: 'POST',
+      url: '/v1/membros',
+      headers: { cookie },
+      payload: { email: 'convidado@exemplo.com.br', papel: 'ANALISTA' },
+    });
+    expect(resposta.statusCode).toBe(201);
+    const { tokenDoConvite } = resposta.json<{ tokenDoConvite: string }>();
+    expect(tokenDoConvite).toBeTruthy();
+    expect(email.enviadas).toHaveLength(1);
+    const mensagem = email.enviadas[0];
+    expect(mensagem?.para).toBe('convidado@exemplo.com.br');
+    expect(mensagem?.texto).toContain(`http://localhost:3000/convite?token=${tokenDoConvite}`);
+  });
+
+  it('recusa o 11º membro com 422 LIMITE_DO_PLANO', async () => {
+    const { app } = ambiente;
+    const { cookie } = await cadastrarOrganizacaoDeTeste(app, 'membros-limite');
+    for (let i = 0; i < 9; i += 1) {
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/v1/membros',
+        headers: { cookie },
+        payload: { email: `m${i}@exemplo.com.br`, papel: 'LEITOR' },
+      });
+      expect(ok.statusCode).toBe(201);
+    }
+    const excedente = await app.inject({
+      method: 'POST',
+      url: '/v1/membros',
+      headers: { cookie },
+      payload: { email: 'excedente@exemplo.com.br', papel: 'LEITOR' },
+    });
+    expect(excedente.statusCode).toBe(422);
+    expect(excedente.json<ErroJson>().erro.codigo).toBe('LIMITE_DO_PLANO');
+  });
+});

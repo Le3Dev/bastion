@@ -9,8 +9,11 @@ export type Papel = (typeof PAPEIS)[number];
 export const TIPOS_DE_SISTEMA = ['SITE', 'API', 'SISTEMA_INTERNO', 'APP_COM_IA'] as const;
 export type TipoDeSistema = (typeof TIPOS_DE_SISTEMA)[number];
 
-export const ORIGENS_DA_AVALIACAO = ['WEB', 'API', 'CI'] as const;
+export const ORIGENS_DA_AVALIACAO = ['WEB', 'API', 'CI', 'AGENDA'] as const;
 export type OrigemDaAvaliacao = (typeof ORIGENS_DA_AVALIACAO)[number];
+
+export const FREQUENCIAS_DA_AGENDA = ['DIARIA', 'SEMANAL', 'MENSAL'] as const;
+export type FrequenciaDaAgenda = (typeof FREQUENCIAS_DA_AGENDA)[number];
 
 export const METODOS_DE_VERIFICACAO = ['DNS_TXT', 'ARQUIVO_WELL_KNOWN', 'CABECALHO_HTTP'] as const;
 export type MetodoDeVerificacao = (typeof METODOS_DE_VERIFICACAO)[number];

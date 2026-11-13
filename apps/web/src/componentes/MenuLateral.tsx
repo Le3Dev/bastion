@@ -23,6 +23,7 @@ export const MenuLateral = () => {
     { rotulo: "Painel", href: "/painel", prefixo: "/painel", icone: "painel" },
     { rotulo: "Sistemas", href: "/sistemas", prefixo: "/sistemas", icone: "sistemas" },
     { rotulo: "Avaliações", href: "/avaliacoes", prefixo: "/avaliacoes", icone: "avaliacoes" },
+    { rotulo: "Agendamentos", href: "/agendamentos", prefixo: "/agendamentos", icone: "relogio" },
     { rotulo: "Achados", href: "/achados", prefixo: "/achados", icone: "achados" },
     { rotulo: "Relatórios", href: "/relatorios", prefixo: "/relatorios", icone: "relatorios" },
     { rotulo: "Integrações", href: "/integracoes", prefixo: "/integracoes", icone: "integracoes" },

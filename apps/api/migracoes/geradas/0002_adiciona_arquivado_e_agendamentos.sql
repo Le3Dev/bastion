@@ -1,0 +1,1 @@
+ALTER TABLE "sistemas" ADD COLUMN "arquivado_em" timestamp with time zone;

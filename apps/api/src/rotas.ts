@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { ServicoDeAchados } from './achados/aplicacao/ServicoDeAchados';
 import { rotasDeAchados } from './achados/infraestrutura/rotas';
+import { ServicoDeAgendamentos } from './agendamentos/aplicacao/ServicoDeAgendamentos';
+import { rotasDeAgendamentos } from './agendamentos/infraestrutura/rotas';
 import { ServicoDeAuditoria } from './auditoria/aplicacao/ServicoDeAuditoria';
 import { rotasDeAuditoria } from './auditoria/infraestrutura/rotas';
 import { ServicoDeAvaliacoes } from './avaliacoes/aplicacao/ServicoDeAvaliacoes';
@@ -33,6 +35,7 @@ export interface Servicos {
   plano: ServicoDePlano;
   sistemas: ServicoDeSistemas;
   avaliacoes: ServicoDeAvaliacoes;
+  agendamentos: ServicoDeAgendamentos;
   achados: ServicoDeAchados;
   relatorios: ServicoDeRelatorios;
   painel: ServicoDePainel;
@@ -51,6 +54,7 @@ export const criarServicos = ({
   relogio,
   armazenamento,
   aoVivo,
+  email,
 }: Dependencias): Servicos => {
   const auditoria = new ServicoDeAuditoria(relogio);
   const cifragem = criarCifragem(config.chaveDeCifragem);
@@ -68,15 +72,17 @@ export const criarServicos = ({
     aoVivo,
     cifragem,
   );
+  const agendamentos = new ServicoDeAgendamentos(db, filas, relogio, auditoria, sistemas, avaliacoes);
   return {
     auditoria,
     contas: new ServicoDeContas(db, config, relogio, auditoria),
-    membros: new ServicoDeMembros(db, config, relogio, auditoria),
+    membros: new ServicoDeMembros(db, config, relogio, auditoria, email),
     chaves: new ServicoDeChavesDeApi(db, relogio, auditoria),
     webhooks: new ServicoDeWebhooks(db, filas, relogio, auditoria),
     plano: new ServicoDePlano(db, relogio),
     sistemas,
     avaliacoes,
+    agendamentos,
     achados,
     relatorios,
     painel: new ServicoDePainel(db, sistemas, avaliacoes, achados),
@@ -96,6 +102,7 @@ export const registrarRotas = (
   void raiz.register(rotasDeSistemas(servicos.sistemas));
   void raiz.register(rotasDeAuditoria(dependencias, servicos.auditoria));
   void raiz.register(rotasDeAvaliacoes(servicos.avaliacoes, dependencias.aoVivo));
+  void raiz.register(rotasDeAgendamentos(servicos.agendamentos));
   void raiz.register(rotasDeAchados(servicos));
   void raiz.register(rotasDeRelatorios(servicos));
   void raiz.register(rotasDoPainel(servicos.painel));

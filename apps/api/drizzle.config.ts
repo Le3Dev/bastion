@@ -13,6 +13,7 @@ export default defineConfig({
     './src/contas/infraestrutura/tabelas.ts',
     './src/sistemas/infraestrutura/tabelas.ts',
     './src/avaliacoes/infraestrutura/tabelas.ts',
+    './src/agendamentos/infraestrutura/tabelas.ts',
     './src/achados/infraestrutura/tabelas.ts',
     './src/relatorios/infraestrutura/tabelas.ts',
     './src/auditoria/infraestrutura/tabelas.ts',

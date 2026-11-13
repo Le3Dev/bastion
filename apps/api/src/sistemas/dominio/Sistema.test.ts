@@ -121,7 +121,22 @@ describe('Sistema', () => {
     }
   });
 
-  it('guarda credencial de teste, conector de IA e consentimento, e reconstitui', () => {
+  it('arquiva o sistema, emite evento, impede nova avaliação e rejeita arquivar de novo', () => {
+    const sistema = Sistema.cadastrar(base(), AGORA);
+    sistema.puxarEventos();
+    expect(sistema.estaArquivado).toBe(false);
+    sistema.arquivar(AGORA);
+    expect(sistema.estaArquivado).toBe(true);
+    expect(sistema.puxarEventos().map((e) => e.tipo)).toEqual(['SistemaArquivado']);
+    expect(sistema.podeAvaliarComPerfil('PASSIVO', AGORA)).toEqual({
+      ok: false,
+      motivo: 'Sistema arquivado.',
+    });
+    expect(codigoDe(() => sistema.arquivar(AGORA))).toBe('JA_ARQUIVADO');
+    expect(Sistema.reconstituir(sistema.paraDados()).arquivadoEm).toEqual(AGORA);
+  });
+
+  it('guarda credencial de teste e conector de IA, e reconstitui', () => {
     const sistema = Sistema.cadastrar(base({ tipo: 'APP_COM_IA' }), AGORA);
     sistema.definirCredencialDeTeste(
       CredencialDeTeste.criar({
@@ -143,10 +158,8 @@ describe('Sistema', () => {
         cabecalhosCifrados: null,
       }),
     );
-    sistema.definirConsentimentoDeCriacaoDeDados(true);
     const copia = Sistema.reconstituir(sistema.paraDados());
     expect(copia.paraDados()).toEqual(sistema.paraDados());
-    expect(copia.permitirCriacaoDeDadosDeTeste).toBe(true);
     expect(JSON.stringify(copia.credencialDeTeste)).not.toContain('cifrado');
     sistema.removerCredencialDeTeste();
     sistema.removerConectorDeIa();

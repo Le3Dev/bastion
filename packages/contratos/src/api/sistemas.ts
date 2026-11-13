@@ -82,10 +82,13 @@ export const SistemaDto = z.object({
   ultimaNota: z.number().nullable(),
   credencialDeTeste: CredencialDeTesteDto,
   conectorDeIa: ConectorDeIaDto,
-  permitirCriacaoDeDadosDeTeste: z.boolean(),
+  arquivado: z.boolean(),
   criadoEm: DataIso,
 });
 export type SistemaDto = z.infer<typeof SistemaDto>;
+
+export const CorpoDeTrocaDeMetodo = z.object({ metodo: z.enum(METODOS_DE_VERIFICACAO) });
+export type CorpoDeTrocaDeMetodo = z.infer<typeof CorpoDeTrocaDeMetodo>;
 
 export const CorpoDeVerificacao = z.object({
   metodo: z.enum(METODOS_DE_VERIFICACAO).optional(),

@@ -22,6 +22,9 @@ import { registrarNoOutbox } from '../../compartilhado/outbox/outbox';
 import type { Relogio } from '../../compartilhado/relogio';
 import { gerarTokenDeVerificacao } from '../../contas/infraestrutura/tokens';
 import { ErroDeTempoEsgotadoDaFila, type Filas } from '../../integracoes/filas';
+import { RepositorioDeAgendamentos } from '../../agendamentos/infraestrutura/RepositorioDeAgendamentos';
+import { PoliticaDeLimitesDoPlano } from '../../contas/dominio/PoliticaDeLimitesDoPlano';
+import type { MetodoDeVerificacao } from '../dominio/MetodoDeVerificacao';
 import { Sistema } from '../dominio/Sistema';
 import { RepositorioDeSistemas } from '../infraestrutura/RepositorioDeSistemas';
 
@@ -69,7 +72,7 @@ export const paraSistemaDto = (sistema: Sistema, agora: Date): SistemaDto => {
           caminhoDaResposta: sistema.conectorDeIa.caminhoDaResposta,
         }
       : { configurado: false, url: null, caminhoDaResposta: null },
-    permitirCriacaoDeDadosDeTeste: sistema.permitirCriacaoDeDadosDeTeste,
+    arquivado: sistema.estaArquivado,
     criadoEm: sistema.criadoEm.toISOString(),
   };
 };
@@ -82,6 +85,7 @@ export class ServicoDeSistemas {
     private readonly auditoria: ServicoDeAuditoria,
     private readonly cifragem: Cifragem,
     private readonly repositorio = new RepositorioDeSistemas(),
+    private readonly agendamentos = new RepositorioDeAgendamentos(),
   ) {}
 
   async cadastrar(
@@ -90,6 +94,9 @@ export class ServicoDeSistemas {
   ): Promise<RespostaDeCadastroDeSistema> {
     const agora = this.relogio.agora();
     return emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {
+      PoliticaDeLimitesDoPlano.exigirPodeCadastrarSistema(
+        await this.repositorio.contarAtivos(tx, contexto.organizacaoId),
+      );
       const sistema = Sistema.cadastrar(
         {
           id: gerarIdentificador(),
@@ -120,10 +127,11 @@ export class ServicoDeSistemas {
     });
   }
 
-  async listar(contexto: ContextoDaRequisicao): Promise<SistemaDto[]> {
+  /** Por padrão esconde os arquivados; `incluirArquivados` os mostra. */
+  async listar(contexto: ContextoDaRequisicao, incluirArquivados = false): Promise<SistemaDto[]> {
     const agora = this.relogio.agora();
     return emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {
-      const sistemas = await this.repositorio.listar(tx, contexto.organizacaoId);
+      const sistemas = await this.repositorio.listar(tx, contexto.organizacaoId, incluirArquivados);
       return sistemas.map((sistema) => paraSistemaDto(sistema, agora));
     });
   }
@@ -268,14 +276,72 @@ export class ServicoDeSistemas {
     });
   }
 
-  async definirConsentimentoDeDados(
+  /**
+   * Arquiva o sistema (não é mais avaliável nem conta no limite do plano) e pausa os
+   * agendamentos dele, na mesma transação. Os agendadores da fila são removidos depois do commit.
+   */
+  async arquivar(contexto: ContextoDaRequisicao, sistemaId: string): Promise<SistemaDto> {
+    const agora = this.relogio.agora();
+    const { dto, agendamentosPausados } = await emContextoDaOrganizacao(
+      this.db,
+      contexto.organizacaoId,
+      async (tx) => {
+        const sistema = await this.exigir(tx, contexto.organizacaoId, sistemaId);
+        sistema.arquivar(agora);
+        await this.repositorio.salvar(tx, sistema);
+        const ativos = await this.agendamentos.listarAtivosPorSistema(
+          tx,
+          contexto.organizacaoId,
+          sistema.id,
+        );
+        for (const agendamento of ativos) {
+          agendamento.pausar(agora);
+          await this.agendamentos.salvar(tx, agendamento);
+          await registrarNoOutbox(tx, agendamento.puxarEventos());
+        }
+        await this.auditoria.registrar(tx, {
+          organizacaoId: contexto.organizacaoId,
+          ator: contexto.ator,
+          acao: 'SISTEMA_ARQUIVADO',
+          alvo: sistema.nome,
+          detalhe: { sistemaId: sistema.id, agendamentosPausados: ativos.length },
+        });
+        await registrarNoOutbox(tx, sistema.puxarEventos());
+        return {
+          dto: paraSistemaDto(sistema, agora),
+          agendamentosPausados: ativos.map((agendamento) => agendamento.id),
+        };
+      },
+    );
+    for (const id of agendamentosPausados) {
+      try {
+        await this.filas.removerAgendamento(id);
+      } catch (erro) {
+        console.error('Falha ao remover o agendador de um sistema arquivado.', erro);
+      }
+    }
+    return dto;
+  }
+
+  /** Troca o método de prova de propriedade: novo token e a verificação volta a PENDENTE. */
+  async trocarMetodo(
     contexto: ContextoDaRequisicao,
     sistemaId: string,
-    permitir: boolean,
-  ): Promise<SistemaDto> {
-    return this.alterar(contexto, sistemaId, 'CONSENTIMENTO_DE_DADOS_ALTERADO', (sistema) => {
-      sistema.definirConsentimentoDeCriacaoDeDados(permitir);
-      return { permitir };
+    metodo: MetodoDeVerificacao,
+  ): Promise<InstrucoesDeVerificacaoDto> {
+    return emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {
+      const sistema = await this.exigir(tx, contexto.organizacaoId, sistemaId);
+      const anterior = sistema.verificacao.metodo;
+      sistema.trocarMetodoDeVerificacao(metodo, gerarTokenDeVerificacao());
+      await this.repositorio.salvar(tx, sistema);
+      await this.auditoria.registrar(tx, {
+        organizacaoId: contexto.organizacaoId,
+        ator: contexto.ator,
+        acao: 'METODO_DE_VERIFICACAO_ALTERADO',
+        alvo: sistema.nome,
+        detalhe: { sistemaId: sistema.id, metodoAnterior: anterior, metodoNovo: metodo },
+      });
+      return paraInstrucoesDto(sistema);
     });
   }
 
@@ -283,7 +349,7 @@ export class ServicoDeSistemas {
   private async alterar(
     contexto: ContextoDaRequisicao,
     sistemaId: string,
-    acao: 'CREDENCIAL_DE_TESTE_ALTERADA' | 'CONECTOR_DE_IA_ALTERADO' | 'CONSENTIMENTO_DE_DADOS_ALTERADO',
+    acao: 'CREDENCIAL_DE_TESTE_ALTERADA' | 'CONECTOR_DE_IA_ALTERADO',
     mudar: (sistema: Sistema) => Record<string, unknown>,
   ): Promise<SistemaDto> {
     return emContextoDaOrganizacao(this.db, contexto.organizacaoId, async (tx) => {

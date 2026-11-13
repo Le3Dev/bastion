@@ -21,7 +21,22 @@ const EsquemaDoAmbiente = z.object({
   SESSAO_DURACAO_HORAS: z.coerce.number().positive().default(12),
   API_LIMITE_DE_TAXA: Booleano(true),
   CHAVE_DE_CIFRAGEM: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORTA: z.coerce.number().int().min(1).max(65535).default(1025),
+  SMTP_SEGURO: Booleano(false),
+  SMTP_USUARIO: z.string().optional(),
+  SMTP_SENHA: z.string().optional(),
+  EMAIL_REMETENTE: z.string().min(1).default('Bastion <nao-responda@bastion.local>'),
 });
+
+export interface ConfigDeEmail {
+  host: string;
+  porta: number;
+  seguro: boolean;
+  usuario?: string;
+  senha?: string;
+  remetente: string;
+}
 
 /** Chave FIXA só para desenvolvimento/testes; nunca use em produção (lá a variável é obrigatória). */
 const CHAVE_DE_CIFRAGEM_DE_DESENVOLVIMENTO = Buffer.from(
@@ -61,6 +76,8 @@ export interface Config {
   limiteDeTaxaAtivo: boolean;
   /** Chave AES-256 (32 bytes) dos segredos em repouso. */
   chaveDeCifragem: Buffer;
+  /** Configuração de SMTP; `null` quando SMTP_HOST está ausente (envio de e-mail desativado). */
+  email: ConfigDeEmail | null;
 }
 
 export const carregarConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
@@ -95,5 +112,16 @@ export const carregarConfig = (env: NodeJS.ProcessEnv = process.env): Config => 
     sessaoDuracaoHoras: e.SESSAO_DURACAO_HORAS,
     limiteDeTaxaAtivo: e.API_LIMITE_DE_TAXA,
     chaveDeCifragem: resolverChaveDeCifragem(env, e.CHAVE_DE_CIFRAGEM),
+    email:
+      e.SMTP_HOST !== undefined && e.SMTP_HOST.trim() !== ''
+        ? {
+            host: e.SMTP_HOST.trim(),
+            porta: e.SMTP_PORTA,
+            seguro: e.SMTP_SEGURO,
+            ...(e.SMTP_USUARIO ? { usuario: e.SMTP_USUARIO } : {}),
+            ...(e.SMTP_SENHA ? { senha: e.SMTP_SENHA } : {}),
+            remetente: e.EMAIL_REMETENTE,
+          }
+        : null,
   };
 };

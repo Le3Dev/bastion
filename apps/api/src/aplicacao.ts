@@ -9,6 +9,7 @@ import { pluginDeAutenticacao } from './compartilhado/autenticacao/autenticacao'
 import { criarConexao } from './compartilhado/banco/conexao';
 import { carregarConfig } from './compartilhado/config';
 import type { Dependencias } from './compartilhado/dependencias';
+import { criarServicoDeEmail } from './compartilhado/email/email';
 import { relogioDoSistema } from './compartilhado/relogio';
 import { registrarTratadorDeErros } from './compartilhado/tratador-de-erros';
 import { criarArmazenamento } from './integracoes/armazenamento';
@@ -35,6 +36,7 @@ export const criarAplicacao = async (
     armazenamento:
       informadas.armazenamento ?? (armazenamentoProprio as NonNullable<typeof armazenamentoProprio>),
     aoVivo: informadas.aoVivo ?? (aoVivoProprio as NonNullable<typeof aoVivoProprio>),
+    email: informadas.email ?? criarServicoDeEmail(config.email),
   };
 
   const app = Fastify({ logger: process.env['NODE_ENV'] !== 'test' });

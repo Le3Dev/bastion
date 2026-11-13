@@ -1,5 +1,5 @@
 import type { EstadoDaAvaliacao } from '@bastion/contratos';
-import { and, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { Transacao } from '../../compartilhado/banco/conexao';
 import {
   avaliacoes,
@@ -196,6 +196,26 @@ export class RepositorioDeAvaliacoes {
       .orderBy(desc(avaliacoes.solicitadaEm), desc(avaliacoes.id))
       .limit(1);
     return linha?.notaMinima ?? null;
+  }
+
+  /** Avaliações solicitadas no intervalo [inicio, fim): base do limite mensal do plano. */
+  async contarSolicitadasNoPeriodo(
+    tx: Transacao,
+    organizacaoId: string,
+    inicio: Date,
+    fim: Date,
+  ): Promise<number> {
+    const [linha] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(avaliacoes)
+      .where(
+        and(
+          eq(avaliacoes.organizacaoId, organizacaoId),
+          gte(avaliacoes.solicitadaEm, inicio),
+          lt(avaliacoes.solicitadaEm, fim),
+        ),
+      );
+    return linha?.total ?? 0;
   }
 
   async contarEmAndamento(tx: Transacao, organizacaoId: string): Promise<number> {
