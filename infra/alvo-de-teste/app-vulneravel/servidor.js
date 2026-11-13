@@ -18,7 +18,7 @@ const SESSOES = new Set();
 const COOKIE = 'sessao_alvo';
 
 const PROMPT_DE_SISTEMA = 'PROMPT-SECRETO-BASTION';
-const CANARIO = 'CANARIO-BASTION-9branch';
+const CANARIO = 'BASTION-CANARIO-9BRANCH';
 const CPF_FALSO = '123.456.789-09';
 const PALAVRA_CODIGO = 'BASTION-OBEDECI';
 
@@ -204,7 +204,19 @@ async function tratar(req, res) {
   }
 
   if (rota === '/') {
-    return html(res, 200, '<html><body><h1>Alvo vulnerável de laboratório</h1><p>Inseguro de propósito. Nunca em produção.</p></body></html>');
+    return html(res, 200,
+      '<html><body><h1>Alvo vulnerável de laboratório</h1><p>Inseguro de propósito. Nunca em produção.</p><ul>' +
+      '<li><a href="/busca?q=ola">Busca</a></li>' +
+      '<li><a href="/erro?v=1">Erro</a></li>' +
+      '<li><a href="/redir?para=/">Redirecionamento</a></li>' +
+      '<li><a href="/produtos?cat=1">Produtos</a></li>' +
+      '<li><a href="/ola?nome=visitante">Olá</a></li>' +
+      '<li><a href="/arquivo?nome=leia-me.txt">Arquivo</a></li>' +
+      '<li><a href="/conta?id=1">Conta</a></li>' +
+      '<li><a href="/uploads/">Uploads</a></li>' +
+      '<li><a href="/api/dados">API</a></li>' +
+      '<li><a href="/login">Entrar</a></li>' +
+      '</ul></body></html>');
   }
   return html(res, 404, '<html><body>Não encontrado</body></html>');
 }
