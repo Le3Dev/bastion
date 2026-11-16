@@ -141,8 +141,10 @@ describe('executor por perfil', () => {
     expect(etapas(eventos).filter((e) => e.endsWith(':CONCLUIDA')).map((e) => e.replace(':CONCLUIDA', ''))).toEqual(
       [...ETAPAS_POR_PERFIL.IA],
     );
-    // O servidor obedece à injeção direta e à indireta.
-    expect(tiposDeConstatacao(eventos)).toEqual(['IA_INJECAO_DE_PROMPT', 'IA_INJECAO_DE_PROMPT']);
+    // O servidor obedece a toda sonda de injeção; todas as constatações são do mesmo tipo.
+    const tipos = tiposDeConstatacao(eventos);
+    expect(tipos.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tipos)).toEqual(new Set(['IA_INJECAO_DE_PROMPT']));
   });
 
   it('IA sem conector falha com motivo claro', async () => {

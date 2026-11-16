@@ -10,6 +10,11 @@ describe('lerConfig', () => {
       requisicoesPorSegundo: 5,
       concorrenciaDeAvaliacoes: 2,
       portaDeSaude: 3334,
+      iaAdaptativoAtivo: false,
+      iaProvedorUrl: 'https://api.anthropic.com/v1/messages',
+      iaProvedorModelo: 'claude-sonnet-5-5',
+      iaProvedorChave: '',
+      iaAdaptativoOrcamento: 12,
     });
     expect(avisar).not.toHaveBeenCalled();
   });
@@ -29,6 +34,32 @@ describe('lerConfig', () => {
     expect(config.requisicoesPorSegundo).toBe(10);
     expect(config.concorrenciaDeAvaliacoes).toBe(4);
     expect(avisar).toHaveBeenCalledWith(expect.stringContaining('Apenas desenvolvimento'));
+  });
+
+  it('lê a configuração do modo adaptativo e avisa se faltar chave', () => {
+    const avisar = vi.fn();
+    const sem = lerConfig({ REDIS_URL: 'redis://x', IA_ADAPTATIVO_ATIVO: 'true' }, avisar);
+    expect(sem.iaAdaptativoAtivo).toBe(true);
+    expect(avisar).toHaveBeenCalledWith(expect.stringContaining('IA_PROVEDOR_CHAVE'));
+
+    const cheio = lerConfig(
+      {
+        REDIS_URL: 'redis://x',
+        IA_ADAPTATIVO_ATIVO: 'true',
+        IA_PROVEDOR_URL: 'http://proxy/v1/messages',
+        IA_PROVEDOR_MODELO: 'outro',
+        IA_PROVEDOR_CHAVE: 'k',
+        IA_ADAPTATIVO_ORCAMENTO: '5',
+      },
+      vi.fn(),
+    );
+    expect(cheio).toMatchObject({
+      iaProvedorUrl: 'http://proxy/v1/messages',
+      iaProvedorModelo: 'outro',
+      iaProvedorChave: 'k',
+      iaAdaptativoOrcamento: 5,
+    });
+    expect(() => lerConfig({ REDIS_URL: 'redis://x', IA_ADAPTATIVO_ORCAMENTO: '41' })).toThrow(/IA_ADAPTATIVO_ORCAMENTO/);
   });
 
   it('explica o que falta', () => {

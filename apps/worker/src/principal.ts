@@ -10,6 +10,8 @@ import { sondarTls } from './guardiao-de-escopo/sonda-tls';
 import { PublicadorDeResultados } from './resultados';
 import { iniciarServidorDeSaude } from './saude';
 import { criarEntregadorDeWebhook } from './tarefas/entregar-webhook';
+import { criarClienteModelo } from './modulos/ativo/cliente-modelo';
+import { criarGeradorAdaptativo, type GeradorAdaptativo } from './modulos/ativo/gerador-adaptativo-ia';
 import { criarExecutorDeAvaliacao } from './tarefas/executar-avaliacao';
 import { criarVerificadorDePropriedade } from './tarefas/verificar-propriedade';
 
@@ -52,7 +54,24 @@ async function iniciar(config: ConfigDoWorker): Promise<void> {
     limitador: new LimitadorDeTaxa(config.requisicoesPorSegundo),
   });
 
+  let geradorAdaptativoDeIa: GeradorAdaptativo | undefined;
+  if (config.iaAdaptativoAtivo) {
+    if (config.iaProvedorChave === '') {
+      registrar('Modo adaptativo de IA ativo, mas sem chave do provedor; seguindo com as sondas fixas.');
+    } else {
+      const cliente = criarClienteModelo({
+        url: config.iaProvedorUrl,
+        modelo: config.iaProvedorModelo,
+        chave: config.iaProvedorChave,
+      });
+      geradorAdaptativoDeIa = criarGeradorAdaptativo({ cliente });
+      registrar('Modo adaptativo de IA ligado: trechos da conversa serão enviados ao provedor do modelo.');
+    }
+  }
+
   const executor = criarExecutorDeAvaliacao({
+    geradorAdaptativoDeIa,
+    orcamentoAdaptativoDeIa: config.iaAdaptativoOrcamento,
     clienteHttp,
     sondaTls: (alvo) => sondarTls({ ...alvo, permitirRedesPrivadas: config.permitirRedesPrivadas }),
     publicador,

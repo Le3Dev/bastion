@@ -105,6 +105,9 @@ export const TIPOS_DE_CONSTATACAO = [
   'IA_VAZAMENTO_DE_DADOS_SENSIVEIS',
   'IA_SAIDA_INSEGURA',
   'IA_ACAO_EXCESSIVA',
+  'INJECAO_DE_COMANDO',
+  'CSRF_AUSENTE',
+  'SSRF',
 ] as const;
 export type TipoDeConstatacao = (typeof TIPOS_DE_CONSTATACAO)[number];
 

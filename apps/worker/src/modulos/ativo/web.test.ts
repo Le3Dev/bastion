@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { RequisicaoBloqueada } from '../../guardiao-de-escopo/cliente-http';
 import { criarAmbiente, escapar, html, servir, type AlvoLocal } from './alvos-de-teste';
-import { descobrirPaginas, extrairFormularios } from './descoberta';
-import { avaliarWeb, detectarErroDetalhado } from './web';
+import {
+  descobrirPaginas,
+  extrairFormularios,
+  type CampoDoFormulario,
+  type FormularioDescoberto,
+  type PaginaDescoberta,
+} from './descoberta';
+import { analisarCsrf, avaliarWeb, detectarErroDetalhado } from './web';
 
 const alvos: AlvoLocal[] = [];
 const ambientes: ReturnType<typeof criarAmbiente>[] = [];
@@ -252,6 +258,175 @@ describe('módulo ativo web (perfil PADRAO)', () => {
   it('detecta apenas padrões reais de erro', () => {
     expect(detectarErroDetalhado('ORA-00933: SQL command not properly ended')).toBe('erro de banco Oracle');
     expect(detectarErroDetalhado('<p>Página não encontrada</p>')).toBeNull();
+  });
+});
+
+describe('reflexão por contexto, arquivos novos e CORS com origem nula', () => {
+  const PAGINA = '<html><body><a href="/r?q=1">r</a></body></html>';
+
+  async function avaliar(
+    manipulador: Parameters<typeof servir>[0],
+  ): Promise<{ alvo: AlvoLocal; constatacoes: Awaited<ReturnType<typeof avaliarWeb>> }> {
+    const alvo = await servir(manipulador);
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const urlInicial = `${alvo.url}/`;
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial });
+    const constatacoes = await avaliarWeb({ contexto: ambiente.contexto, urlInicial, paginas });
+    return { alvo, constatacoes };
+  }
+
+  const pagina = (res: Parameters<typeof html>[0], caminho: string, corpo: string): void =>
+    caminho === '/' ? html(res, PAGINA) : html(res, corpo, caminho === '/r' ? 200 : 404);
+
+  it('detecta reflexão em atributo quando a aspa sobrevive', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = (url.searchParams.get('q') ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      pagina(res, url.pathname, `<html><input name="q" value="${q}"></html>`);
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE');
+    expect(achado?.titulo).toContain('atributo');
+    expect(achado?.severidade).toBe('ALTA');
+  });
+
+  it('detecta reflexão em string JavaScript com aspa simples intacta', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = (url.searchParams.get('q') ?? '').replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/"/g, '\\"');
+      pagina(res, url.pathname, `<html><script>var termo = '${q}';</script></html>`);
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE');
+    expect(achado?.titulo).toContain('script');
+  });
+
+  it('não acusa páginas que escapam corretamente em corpo, atributo e script', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      const q = url.searchParams.get('q') ?? '';
+      const seguro = escapar(q).replace(/'/g, '&#39;');
+      const js = JSON.stringify(q).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/'/g, '\\u0027');
+      pagina(
+        res,
+        url.pathname,
+        `<html><p>${seguro}</p><input value="${seguro}"><script>var a = ${js}; var b = '${js.slice(1, -1)}';</script></html>`,
+      );
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'ENTRADA_REFLETIDA_SEM_ESCAPE')).toEqual([]);
+  });
+
+  it('detecta /.env.local, mascarando os valores', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      if (req.url === '/.env.local') return void res.end('API_TOKEN=valor-ultra-secreto\n');
+      html(res, '<html>x</html>', 404);
+    });
+    const achado = constatacoes.find((c) => c.local === 'caminho:/.env.local');
+    expect(achado?.tipo).toBe('ARQUIVO_SENSIVEL_EXPOSTO');
+    expect(JSON.stringify(constatacoes)).not.toContain('valor-ultra-secreto');
+  });
+
+  it('detecta CORS com Origin: null e credenciais, só quando a origem é nula', async () => {
+    const { constatacoes } = await avaliar((req, res) => {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, { allow: 'GET, HEAD, OPTIONS' });
+        return void res.end();
+      }
+      if (req.headers.origin === 'null') {
+        res.setHeader('access-control-allow-origin', 'null');
+        res.setHeader('access-control-allow-credentials', 'true');
+      }
+      html(res, '<html>x</html>', 404);
+    });
+    const cors = constatacoes.filter((c) => c.tipo === 'CORS_PERMISSIVO');
+    expect(cors).toHaveLength(1);
+    expect(cors[0]?.severidade).toBe('ALTA');
+    expect(cors[0]?.titulo).toContain('null');
+  });
+});
+
+describe('CSRF ausente (inspeção de formulários)', () => {
+  const pagina = (formularios: FormularioDescoberto[]): PaginaDescoberta => ({
+    url: 'https://app.exemplo.com.br/',
+    metodo: 'GET',
+    status: 200,
+    formularios,
+    tamanhoDoCorpo: 100,
+    parametros: [],
+  });
+  const campo = (nome: string, tipo = 'text', valor = ''): CampoDoFormulario => ({ nome, tipo, valor });
+
+  it('acusa formulário POST sem token, uma vez por ação, e ignora login, busca, token oculto e GET', () => {
+    const achados = analisarCsrf([
+      pagina([
+        { acao: 'https://app.exemplo.com.br/perfil', metodo: 'POST', campos: [campo('nome'), campo('email')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/perfil', metodo: 'POST', campos: [campo('nome'), campo('email')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/entrar', metodo: 'POST', campos: [campo('u'), campo('s', 'password')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/busca', metodo: 'POST', campos: [campo('q'), campo('f')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/filtrar', metodo: 'POST', campos: [campo('termo')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/conta', metodo: 'POST', campos: [campo('a'), campo('_t', 'hidden', 'x')], tokenCsrf: { nome: '_t', valor: 'x' } },
+        { acao: 'https://app.exemplo.com.br/dados', metodo: 'POST', campos: [campo('a'), campo('anti_token', 'hidden', 'x')], tokenCsrf: null },
+        { acao: 'https://app.exemplo.com.br/lista', metodo: 'GET', campos: [campo('a'), campo('b')], tokenCsrf: null },
+      ]),
+    ]);
+    expect(achados).toHaveLength(1);
+    expect(achados[0]?.tipo).toBe('CSRF_AUSENTE');
+    expect(achados[0]?.severidade).toBe('MEDIA');
+    expect(achados[0]?.local).toBe('formulario:/perfil');
+    expect(achados[0]?.evidencia.resposta).toContain('nome, email');
+    expect(achados[0]?.evidencia.observacao).toContain('confirme manualmente');
+  });
+});
+
+describe('SSRF por destino reservado', () => {
+  const PAGINA = '<html><body><a href="/buscar-url?url=/imagem.png">i</a></body></html>';
+
+  async function avaliar(manipulador: Parameters<typeof servir>[0]): Promise<Awaited<ReturnType<typeof avaliarWeb>>> {
+    const alvo = await servir(manipulador);
+    alvos.push(alvo);
+    const ambiente = criarAmbiente();
+    ambientes.push(ambiente);
+    const urlInicial = `${alvo.url}/`;
+    const paginas = await descobrirPaginas({ contexto: ambiente.contexto, urlInicial });
+    return avaliarWeb({ contexto: ambiente.contexto, urlInicial, paginas });
+  }
+
+  it('acusa quando a resposta traz erro de DNS do destino de teste', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      const destino = url.searchParams.get('url') ?? '';
+      if (destino.startsWith('http://')) {
+        return html(res, `<pre>Error: getaddrinfo ENOTFOUND ${new URL(destino).hostname}</pre>`, 502);
+      }
+      html(res, '<p>imagem</p>');
+    });
+    const achado = constatacoes.find((c) => c.tipo === 'SSRF');
+    expect(achado?.severidade).toBe('MEDIA');
+    expect(achado?.local).toBe('parametro:/buscar-url?url');
+    expect(achado?.evidencia.requisicao).toContain('bastion-teste.invalid');
+  });
+
+  it('não acusa quando o valor apenas é refletido ou ignorado', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      html(res, `<p>Você pediu ${escapar(url.searchParams.get('url') ?? '')}</p>`);
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'SSRF')).toEqual([]);
+  });
+
+  it('não acusa quando o erro de DNS aparece também no controle malformado', async () => {
+    const constatacoes = await avaliar((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname === '/') return html(res, PAGINA);
+      if (url.pathname !== '/buscar-url') return html(res, 'x', 404);
+      const destino = url.searchParams.get('url') ?? '';
+      html(res, destino.startsWith('/') ? '<p>ok</p>' : `<pre>getaddrinfo ENOTFOUND ${escapar(destino)}</pre>`);
+    });
+    expect(constatacoes.filter((c) => c.tipo === 'SSRF')).toEqual([]);
   });
 });
 
