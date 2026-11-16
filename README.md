@@ -268,6 +268,8 @@ Reforços de detecção: o perfil `PADRAO` agora detecta entrada refletida tamb�
 
 Novos detectores: os perfis ativos agora também detectam **injeção de comando** (marcador aritmético avaliado pelo alvo), **ausência de proteção anti-CSRF** em formulários que mudam estado e **falsificação de requisição do lado do servidor (SSRF)**. Todos são não destrutivos; para CSRF e SSRF recomenda-se confirmação manual do achado. O alvo de laboratório ganhou as rotas `/ping` (comando simulado, sem shell real), `/transferencia` (formulário sem token) e `/busca-url` (busca no servidor que ecoa host e motivo do erro).
 
+Modo adaptativo do perfil `IA` (opt-in, desligado por padrão): ligado por variáveis de ambiente do worker (`IA_ADAPTATIVO_ATIVO`, `IA_PROVEDOR_URL`, `IA_PROVEDOR_MODELO`, `IA_PROVEDOR_CHAVE`, `IA_ADAPTATIVO_ORCAMENTO`), um modelo propõe as próximas mensagens de teste conforme as respostas do chatbot. Os **detectores determinísticos continuam decidindo as constatações**; o modelo nunca declara um achado. **Privacidade:** nesse modo, trechos da conversa com o chatbot do cliente são enviados ao provedor do modelo; ligue só com ciência e aval do cliente. Se o modo estiver ativo sem chave, o gerador falhar ou devolver nada, o worker recorre às sondas fixas da categoria; o total de mensagens respeita o orçamento e o teto de 40 mensagens.
+
 #### Segurança dos perfis ativos
 
 Salvaguardas valem para qualquer avaliação ativa:
