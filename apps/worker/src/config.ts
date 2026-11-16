@@ -25,6 +25,16 @@ const EsquemaDoAmbiente = z.object({
     .min(1, 'deve ser no mínimo 1.')
     .max(65535, 'deve ser no máximo 65535.')
     .default(3334),
+  IA_ADAPTATIVO_ATIVO: textoBooleano,
+  IA_PROVEDOR_URL: z.string().default('https://api.anthropic.com/v1/messages'),
+  IA_PROVEDOR_MODELO: z.string().default('claude-sonnet-5-5'),
+  IA_PROVEDOR_CHAVE: z.string().default(''),
+  IA_ADAPTATIVO_ORCAMENTO: z.coerce
+    .number({ error: 'deve ser um número.' })
+    .int('deve ser inteiro.')
+    .min(1, 'deve ser no mínimo 1.')
+    .max(40, 'deve ser no máximo 40.')
+    .default(12),
 });
 
 export interface ConfigDoWorker {
@@ -33,6 +43,11 @@ export interface ConfigDoWorker {
   requisicoesPorSegundo: number;
   concorrenciaDeAvaliacoes: number;
   portaDeSaude: number;
+  iaAdaptativoAtivo: boolean;
+  iaProvedorUrl: string;
+  iaProvedorModelo: string;
+  iaProvedorChave: string;
+  iaAdaptativoOrcamento: number;
 }
 
 /** Lê e valida o ambiente. Variáveis vazias valem como ausentes. */
@@ -57,11 +72,19 @@ export function lerConfig(
       'AVISO: GUARDIAO_PERMITIR_REDES_PRIVADAS=true libera redes privadas e loopback. Apenas desenvolvimento; proibido em produção.',
     );
   }
+  if (dados.IA_ADAPTATIVO_ATIVO && dados.IA_PROVEDOR_CHAVE === '') {
+    avisar('AVISO: IA_ADAPTATIVO_ATIVO=true sem IA_PROVEDOR_CHAVE; o modo adaptativo será ignorado.');
+  }
   return {
     redisUrl: dados.REDIS_URL,
     permitirRedesPrivadas: dados.GUARDIAO_PERMITIR_REDES_PRIVADAS,
     requisicoesPorSegundo: dados.GUARDIAO_REQUISICOES_POR_SEGUNDO,
     concorrenciaDeAvaliacoes: dados.WORKER_CONCORRENCIA_AVALIACOES,
     portaDeSaude: dados.WORKER_PORTA,
+    iaAdaptativoAtivo: dados.IA_ADAPTATIVO_ATIVO,
+    iaProvedorUrl: dados.IA_PROVEDOR_URL,
+    iaProvedorModelo: dados.IA_PROVEDOR_MODELO,
+    iaProvedorChave: dados.IA_PROVEDOR_CHAVE,
+    iaAdaptativoOrcamento: dados.IA_ADAPTATIVO_ORCAMENTO,
   };
 }

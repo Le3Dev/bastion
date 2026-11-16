@@ -29,8 +29,10 @@ import {
   avaliarSaida,
   avaliarVazamento,
   conectarIa,
+  modoAdaptativoDe,
   type ConversaDeIa,
 } from '../modulos/ativo/ia';
+import type { GeradorAdaptativo } from '../modulos/ativo/gerador-adaptativo-ia';
 import {
   analisarCsrf,
   sondarArquivosExpostos,
@@ -105,6 +107,9 @@ export interface DependenciasDoExecutor {
   requisicoesPorSegundoMaximo?: number;
   /** Mensagens de teste por segundo ao conector de IA (padrão 1; só os testes alteram). */
   mensagensDeIaPorSegundo?: number;
+  /** Modo adaptativo do perfil de IA (opt-in); ausente = sondas fixas. */
+  geradorAdaptativoDeIa?: GeradorAdaptativo;
+  orcamentoAdaptativoDeIa?: number;
 }
 
 export interface ExecutorDeAvaliacao {
@@ -263,18 +268,25 @@ export function criarExecutorDeAvaliacao(deps: DependenciasDoExecutor): Executor
         if (!conector) throw new Error('O perfil de IA exige um conector de IA configurado no sistema.');
         const limitadorDeIa = new LimitadorDeTaxa(deps.mensagensDeIaPorSegundo ?? 1);
         await etapa('Conector de IA', true, async () => {
-          conversa = await conectarIa({ contexto, conector, limitador: limitadorDeIa });
+          conversa = await conectarIa({
+            contexto,
+            conector,
+            limitador: limitadorDeIa,
+            gerador: deps.geradorAdaptativoDeIa,
+            orcamentoAdaptativo: deps.orcamentoAdaptativoDeIa,
+          });
         });
         const dialogo = conversa as ConversaDeIa | null;
         if (dialogo === null) throw new Error('O conector de IA não respondeu.');
+        const adaptativo = modoAdaptativoDe({ gerador: deps.geradorAdaptativoDeIa, orcamentoAdaptativo: deps.orcamentoAdaptativoDeIa });
         await etapa('Integridade do prompt', false, async () =>
-          emitirConstatacoes(await avaliarIntegridadeDoPrompt(dialogo, conector)),
+          emitirConstatacoes(await avaliarIntegridadeDoPrompt(dialogo, conector, adaptativo)),
         );
         await etapa('Vazamento de informação', false, async () =>
-          emitirConstatacoes(await avaliarVazamento(dialogo, conector)),
+          emitirConstatacoes(await avaliarVazamento(dialogo, conector, adaptativo)),
         );
         await etapa('Segurança da saída', false, async () =>
-          emitirConstatacoes(await avaliarSaida(dialogo, conector)),
+          emitirConstatacoes(await avaliarSaida(dialogo, conector, adaptativo)),
         );
         await encerrar();
         return;
