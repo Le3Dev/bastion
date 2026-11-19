@@ -35,7 +35,7 @@ Para continuar o desenvolvimento em outra máquina, veja a seção 9.2.
 
 O protótipo da Fase 1 (dados fictícios em memória) foi removido (ADR 16): o web agora depende da API, do banco e do worker.
 
-**Build de produção.** `corepack pnpm -r build` gera `apps/api/dist` e `apps/worker/dist` (tsup) e o `.next/standalone` do web (`output: 'standalone'`). Os starts de produção são `node apps/api/dist/servidor.js`, `node apps/worker/dist/principal.js` e o `server.js` do standalone do web. A migração em produção roda com `node apps/api/dist/migrar.js`. O deploy em Kubernetes está na seção 4.6.
+**Build de produção.** `corepack pnpm -r build` gera `apps/api/dist` e `apps/worker/dist` (tsup) e o `.next/standalone` do web (`output: 'standalone'`). Os starts de produção são `node apps/api/dist/servidor.js`, `node apps/worker/dist/principal.js` e o `server.js` do standalone do web. A migração em produção roda com `node apps/api/dist/migrar.js`. O deploy em Kubernetes está na seção 4.7.
 
 ### Plataforma (Fase 2)
 
@@ -234,7 +234,17 @@ Em texto: web ou CI chamam a API; a API enfileira a tarefa; o worker consome, pa
 - `RISCO_ACEITO` exige justificativa, responsável e data de validade. Quando vence, volta para `CONFIRMADO`.
 - Achados repetidos entre avaliações são agrupados pela `ImpressaoDigital` (sistema + tipo + local).
 
-### 4.5 Decisões de arquitetura (ADRs)
+### 4.5 Perfil AUTONOMO (agente de avaliação)
+
+No perfil `AUTONOMO` um modelo de linguagem orquestra os detectores ativos já existentes, sempre dentro do escopo autorizado (o Guardião de Escopo continua valendo para toda requisição).
+
+- Etapas: Conferir propriedade e escopo, Mapeamento de páginas (e autenticação de teste, se houver credencial), Ações do agente, Análise e deduplicação. O progresso é por fase, pois o número de passos do agente é dinâmico.
+- O modelo só escolhe entre um catálogo fechado de ferramentas (arquivos expostos, CORS, redirecionamentos, entrada refletida, erros detalhados, CSRF, SSRF e, com sessão, controle de acesso e injeção), dentro de um orçamento de passos. Quem decide as constatações são os detectores, não o modelo.
+- Cada decisão (passo, ferramenta, motivo, nº de constatações) é registrada no log do worker para auditoria.
+- Opt-in por variável de ambiente (`IA_AUTONOMO_ATIVO`, `IA_AUTONOMO_ORCAMENTO`) e exige a chave do provedor (`IA_PROVEDOR_*`). Sem chave, o perfil roda, mas a etapa "Ações do agente" é ignorada.
+- Privacidade: trechos do conteúdo do alvo são enviados ao provedor do modelo; a chave nunca é registrada em log.
+
+### 4.6 Decisões de arquitetura (ADRs)
 
 | # | Contexto | Decisão | Consequência |
 |---|---|---|---|
@@ -283,7 +293,7 @@ Salvaguardas valem para qualquer avaliação ativa:
 - **Autorização por escrito obrigatória:** registrada antes de iniciar, e tudo fica na auditoria.
 - **Alvo de laboratório:** `alvo-vulneravel` (porta 8081) é inseguro de propósito, só para dev e testes; nunca em produção.
 
-### 4.6 Deploy (Kubernetes)
+### 4.7 Deploy (Kubernetes)
 
 - **Imagens:** três imagens no GHCR (`ghcr.io/le3dev/bastion-web`, `bastion-api` e `bastion-worker`), a partir de `infra/docker/Dockerfile.{web,api,worker}`, construídas e publicadas pelo workflow `.github/workflows/imagens.yml` (push na `main` e tags `v*`). A imagem da API inclui o Chromium, usado no PDF (ADR 13).
 - **Kustomize:** `infra/k8s/base` mais `overlays/staging` e `overlays/producao`. O overlay fixa o namespace, as réplicas, os hosts do Ingress e `GUARDIAO_PERMITIR_REDES_PRIVADAS=false`. Para conferir o que será aplicado: `kubectl kustomize infra/k8s/overlays/producao`.
