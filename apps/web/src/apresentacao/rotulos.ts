@@ -78,6 +78,7 @@ const ROTULOS_DE_PERFIL: Record<PerfilDeAvaliacao, string> = {
   PADRAO: "Padrão",
   COMPLETO: "Completo",
   IA: "IA (chatbots e agentes)",
+  AUTONOMO: "Autônomo",
 };
 
 export const rotuloDoPerfil = (p: PerfilDeAvaliacao): string => ROTULOS_DE_PERFIL[p];

@@ -39,6 +39,11 @@ const PERFIS: OpcaoDePerfil[] = [
     descricao:
       "Teste de chatbots/agentes (OWASP LLM): integridade do prompt, vazamento de informação e segurança da saída. Só para sistemas do tipo App com IA e com conector configurado.",
   },
+  {
+    perfil: "AUTONOMO",
+    descricao:
+      "Um agente de IA conduz a avaliação, decidindo os próximos testes dentro do escopo autorizado; exige autorização por escrito.",
+  },
 ];
 
 const ehPerfilAtivo = (p: PerfilDeAvaliacao): boolean => p !== "PASSIVO";

@@ -17,7 +17,7 @@ import estilos from "../avaliacoes/nova/nova.module.css";
 
 type Frequencia = AgendamentoDto["frequencia"];
 
-const PERFIS: PerfilDeAvaliacao[] = ["PASSIVO", "PADRAO", "COMPLETO", "IA"];
+const PERFIS: PerfilDeAvaliacao[] = ["PASSIVO", "PADRAO", "COMPLETO", "IA", "AUTONOMO"];
 const DIAS_DA_SEMANA = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 const ROTULOS_DE_FREQUENCIA: Record<Frequencia, string> = { DIARIA: "Diária", SEMANAL: "Semanal", MENSAL: "Mensal" };
 
