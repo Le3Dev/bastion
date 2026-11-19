@@ -33,6 +33,8 @@ import {
   type ConversaDeIa,
 } from '../modulos/ativo/ia';
 import type { GeradorAdaptativo } from '../modulos/ativo/gerador-adaptativo-ia';
+import type { ClienteModelo } from '../modulos/ativo/cliente-modelo';
+import { criarCatalogoDeFerramentas, executarAgenteAutonomo } from '../modulos/ativo/agente-autonomo';
 import {
   analisarCsrf,
   sondarArquivosExpostos,
@@ -87,11 +89,19 @@ const ETAPAS_IA = [
   'Análise e deduplicação',
 ] as const;
 
+const ETAPAS_AUTONOMO = [
+  'Conferir propriedade e escopo',
+  'Mapeamento de páginas',
+  'Ações do agente',
+  'Análise e deduplicação',
+] as const;
+
 export const ETAPAS_POR_PERFIL: Record<PerfilDeAvaliacao, readonly string[]> = {
   PASSIVO: ETAPAS,
   PADRAO: ETAPAS_PADRAO,
   COMPLETO: ETAPAS_COMPLETO,
   IA: ETAPAS_IA,
+  AUTONOMO: ETAPAS_AUTONOMO,
 };
 
 export type SondaTls = (alvo: { host: string; porta: number }) => Promise<DadosDoTls>;
@@ -110,6 +120,9 @@ export interface DependenciasDoExecutor {
   /** Modo adaptativo do perfil de IA (opt-in); ausente = sondas fixas. */
   geradorAdaptativoDeIa?: GeradorAdaptativo;
   orcamentoAdaptativoDeIa?: number;
+  /** Modelo que orquestra o perfil AUTONOMO; ausente = a etapa do agente é ignorada. */
+  clienteDeModeloAutonomo?: ClienteModelo;
+  orcamentoAutonomo?: number;
 }
 
 export interface ExecutorDeAvaliacao {
@@ -314,24 +327,73 @@ export function criarExecutorDeAvaliacao(deps: DependenciasDoExecutor): Executor
       const coletada = resposta as RespostaColetada | null;
       if (coletada === null) throw new Error('Nenhuma resposta foi coletada da URL de homologação.');
 
-      // 2. Cabeçalhos de segurança
-      await etapa('Cabeçalhos de segurança', false, async () => emitirConstatacoes(analisarCabecalhos(coletada)));
+      if (tarefa.perfil !== 'AUTONOMO') {
+        // 2. Cabeçalhos de segurança
+        await etapa('Cabeçalhos de segurança', false, async () => emitirConstatacoes(analisarCabecalhos(coletada)));
 
-      // 3. TLS e certificado (a falha desta sonda não derruba a avaliação)
-      await etapa('TLS e certificado', false, async () => {
-        const final = new URL(coletada.url);
-        if (final.protocol !== 'https:') return 'ignorada';
-        const porta = final.port === '' ? 443 : Number(final.port);
-        const dados = await deps.sondaTls({ host: final.hostname, porta });
-        await emitirConstatacoes(analisarTls(dados, new Date()));
-        return undefined;
-      });
+        // 3. TLS e certificado (a falha desta sonda não derruba a avaliação)
+        await etapa('TLS e certificado', false, async () => {
+          const final = new URL(coletada.url);
+          if (final.protocol !== 'https:') return 'ignorada';
+          const porta = final.port === '' ? 443 : Number(final.port);
+          const dados = await deps.sondaTls({ host: final.hostname, porta });
+          await emitirConstatacoes(analisarTls(dados, new Date()));
+          return undefined;
+        });
 
-      // 4. Flags de cookies
-      await etapa('Flags de cookies', false, async () => emitirConstatacoes(analisarCookies(coletada)));
+        // 4. Flags de cookies
+        await etapa('Flags de cookies', false, async () => emitirConstatacoes(analisarCookies(coletada)));
 
-      // 5. Exposição de versão
-      await etapa('Exposição de versão', false, async () => emitirConstatacoes(analisarExposicaoDeVersao(coletada)));
+        // 5. Exposição de versão
+        await etapa('Exposição de versão', false, async () => emitirConstatacoes(analisarExposicaoDeVersao(coletada)));
+      }
+
+      if (tarefa.perfil === 'AUTONOMO') {
+        const inicioA = urlInicial.toString();
+        const credencialA = tarefa.credencialDeTeste;
+        let paginasA: PaginaDescoberta[] = [];
+        let sessaoA: SessaoDeTeste | null = null;
+        let paginasAutenticadasA: PaginaDescoberta[] = [];
+
+        await etapa('Mapeamento de páginas', false, async () => {
+          paginasA = await descobrirPaginas({ contexto, urlInicial: inicioA });
+          if (credencialA) {
+            sessaoA = await autenticar({ contexto, credencial: credencialA });
+            paginasAutenticadasA = await descobrirPaginas({ contexto: sessaoA.contexto, urlInicial: inicioA });
+          }
+        });
+        const sessaoAtiva = sessaoA as SessaoDeTeste | null;
+
+        await etapa('Ações do agente', false, async () => {
+          const cliente = deps.clienteDeModeloAutonomo;
+          if (!cliente) {
+            console.log(
+              `[worker] Avaliação ${avaliacaoId}: etapa do agente ignorada (sem chave do provedor do modelo ou modo autônomo desligado).`,
+            );
+            return 'ignorada';
+          }
+          const catalogo = criarCatalogoDeFerramentas({
+            contexto,
+            urlInicial: inicioA,
+            paginas: paginasA,
+            ...(sessaoAtiva ? { sessao: sessaoAtiva, paginasAutenticadas: paginasAutenticadasA } : {}),
+          });
+          const achados = await executarAgenteAutonomo({
+            catalogo,
+            cliente,
+            orcamentoDePassos: deps.orcamentoAutonomo ?? 8,
+            aoDecidir: (registro) =>
+              console.log(
+                `[worker] Avaliação ${avaliacaoId}: passo ${registro.passo} -> ${registro.ferramenta} (${registro.constatacoes} constatações): ${registro.motivo}`,
+              ),
+          });
+          await emitirConstatacoes(credencialA ? protegerConstatacoes(achados, credencialA) : achados);
+          return undefined;
+        });
+
+        await encerrar();
+        return;
+      }
 
       if (tarefa.perfil === 'PADRAO' || tarefa.perfil === 'COMPLETO') {
         const inicio0 = urlInicial.toString();

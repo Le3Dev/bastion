@@ -15,6 +15,8 @@ describe('lerConfig', () => {
       iaProvedorModelo: 'claude-sonnet-5-5',
       iaProvedorChave: '',
       iaAdaptativoOrcamento: 12,
+      iaAutonomoAtivo: false,
+      iaAutonomoOrcamento: 15,
     });
     expect(avisar).not.toHaveBeenCalled();
   });
@@ -60,6 +62,19 @@ describe('lerConfig', () => {
       iaAdaptativoOrcamento: 5,
     });
     expect(() => lerConfig({ REDIS_URL: 'redis://x', IA_ADAPTATIVO_ORCAMENTO: '41' })).toThrow(/IA_ADAPTATIVO_ORCAMENTO/);
+  });
+
+  it('lê a configuração do agente autônomo e avisa se faltar chave', () => {
+    const avisar = vi.fn();
+    const sem = lerConfig({ REDIS_URL: 'redis://x', IA_AUTONOMO_ATIVO: 'true' }, avisar);
+    expect(sem.iaAutonomoAtivo).toBe(true);
+    expect(avisar).toHaveBeenCalledWith(expect.stringContaining('IA_AUTONOMO_ATIVO'));
+    const cheio = lerConfig(
+      { REDIS_URL: 'redis://x', IA_AUTONOMO_ATIVO: 'true', IA_PROVEDOR_CHAVE: 'k', IA_AUTONOMO_ORCAMENTO: '7' },
+      vi.fn(),
+    );
+    expect(cheio).toMatchObject({ iaAutonomoAtivo: true, iaAutonomoOrcamento: 7 });
+    expect(() => lerConfig({ REDIS_URL: 'redis://x', IA_AUTONOMO_ORCAMENTO: '61' })).toThrow(/IA_AUTONOMO_ORCAMENTO/);
   });
 
   it('explica o que falta', () => {

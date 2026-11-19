@@ -35,6 +35,13 @@ const EsquemaDoAmbiente = z.object({
     .min(1, 'deve ser no mínimo 1.')
     .max(40, 'deve ser no máximo 40.')
     .default(12),
+  IA_AUTONOMO_ATIVO: textoBooleano,
+  IA_AUTONOMO_ORCAMENTO: z.coerce
+    .number({ error: 'deve ser um número.' })
+    .int('deve ser inteiro.')
+    .min(1, 'deve ser no mínimo 1.')
+    .max(60, 'deve ser no máximo 60.')
+    .default(15),
 });
 
 export interface ConfigDoWorker {
@@ -48,6 +55,8 @@ export interface ConfigDoWorker {
   iaProvedorModelo: string;
   iaProvedorChave: string;
   iaAdaptativoOrcamento: number;
+  iaAutonomoAtivo: boolean;
+  iaAutonomoOrcamento: number;
 }
 
 /** Lê e valida o ambiente. Variáveis vazias valem como ausentes. */
@@ -75,6 +84,9 @@ export function lerConfig(
   if (dados.IA_ADAPTATIVO_ATIVO && dados.IA_PROVEDOR_CHAVE === '') {
     avisar('AVISO: IA_ADAPTATIVO_ATIVO=true sem IA_PROVEDOR_CHAVE; o modo adaptativo será ignorado.');
   }
+  if (dados.IA_AUTONOMO_ATIVO && dados.IA_PROVEDOR_CHAVE === '') {
+    avisar('AVISO: IA_AUTONOMO_ATIVO=true sem IA_PROVEDOR_CHAVE; o agente autônomo será ignorado.');
+  }
   return {
     redisUrl: dados.REDIS_URL,
     permitirRedesPrivadas: dados.GUARDIAO_PERMITIR_REDES_PRIVADAS,
@@ -86,5 +98,7 @@ export function lerConfig(
     iaProvedorModelo: dados.IA_PROVEDOR_MODELO,
     iaProvedorChave: dados.IA_PROVEDOR_CHAVE,
     iaAdaptativoOrcamento: dados.IA_ADAPTATIVO_ORCAMENTO,
+    iaAutonomoAtivo: dados.IA_AUTONOMO_ATIVO,
+    iaAutonomoOrcamento: dados.IA_AUTONOMO_ORCAMENTO,
   };
 }

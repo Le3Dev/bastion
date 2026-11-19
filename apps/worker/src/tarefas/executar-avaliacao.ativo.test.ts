@@ -4,7 +4,8 @@ import { criarClienteHttp, type ClienteHttp } from '../guardiao-de-escopo/client
 import { LimitadorDeTaxa } from '../guardiao-de-escopo/limitador-de-taxa';
 import { escopoDeTeste, html, servir, type AlvoLocal } from '../modulos/ativo/alvos-de-teste';
 import type { DadosDoEvento } from '../resultados';
-import { criarExecutorDeAvaliacao, ETAPAS_POR_PERFIL } from './executar-avaliacao';
+import type { ClienteModelo } from '../modulos/ativo/cliente-modelo';
+import { criarExecutorDeAvaliacao, ETAPAS_POR_PERFIL, type DependenciasDoExecutor } from './executar-avaliacao';
 
 const alvos: AlvoLocal[] = [];
 const clientes: ClienteHttp[] = [];
@@ -13,7 +14,7 @@ afterEach(async () => {
   await Promise.all(clientes.splice(0).map((c) => c.fechar()));
 });
 
-function executar(tarefa: TarefaExecutarAvaliacao) {
+function executar(tarefa: TarefaExecutarAvaliacao, extras: Partial<DependenciasDoExecutor> = {}) {
   const eventos: DadosDoEvento[] = [];
   const cliente = criarClienteHttp({ permitirRedesPrivadas: true, limitador: new LimitadorDeTaxa(100_000) });
   clientes.push(cliente);
@@ -29,6 +30,7 @@ function executar(tarefa: TarefaExecutarAvaliacao) {
     cancelamento: { foiCancelada: () => Promise.resolve(false) },
     relogio: () => Date.now(),
     mensagensDeIaPorSegundo: 100_000,
+    ...extras,
   });
   return { rodar: () => executor.executar(tarefa), eventos };
 }
@@ -94,6 +96,29 @@ describe('executor por perfil', () => {
     expect(lista).toContain('Autenticação de teste:IGNORADA');
     expect(lista).toContain('Controle de acesso:IGNORADA');
     expect(lista).toContain('Injeção (SQL, template, caminho):CONCLUIDA');
+    expect(eventos.at(-1)?.tipo).toBe('avaliacao-finalizada');
+  });
+
+  it('AUTONOMO: o modelo escolhe ferramentas, o executor emite as etapas e as constatações', async () => {
+    const alvo = await alvoWeb();
+    const respostas = ['arquivos_expostos\nverificar arquivos', 'entrada_refletida\nverificar reflexo', 'FIM\nconcluido'];
+    const cliente: ClienteModelo = { completar: () => Promise.resolve(respostas.shift() ?? 'FIM') };
+    const { rodar, eventos } = executar(tarefa('AUTONOMO', alvo), { clienteDeModeloAutonomo: cliente, orcamentoAutonomo: 5 });
+    await rodar();
+    expect(eventos.find((e) => e.tipo === 'avaliacao-falhou')).toBeUndefined();
+    const esperadas = ETAPAS_POR_PERFIL.AUTONOMO.flatMap((nome) => [`${nome}:EM_EXECUCAO`, `${nome}:CONCLUIDA`]);
+    expect(etapas(eventos)).toEqual(esperadas);
+    expect(tiposDeConstatacao(eventos)).toEqual(
+      expect.arrayContaining(['ARQUIVO_SENSIVEL_EXPOSTO', 'ENTRADA_REFLETIDA_SEM_ESCAPE']),
+    );
+    expect(eventos.at(-1)?.tipo).toBe('avaliacao-finalizada');
+  });
+
+  it('AUTONOMO sem cliente de modelo ignora a etapa do agente e conclui', async () => {
+    const alvo = await alvoWeb();
+    const { rodar, eventos } = executar(tarefa('AUTONOMO', alvo));
+    await rodar();
+    expect(etapas(eventos)).toContain('Ações do agente:IGNORADA');
     expect(eventos.at(-1)?.tipo).toBe('avaliacao-finalizada');
   });
 

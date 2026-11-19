@@ -10,7 +10,7 @@ import { sondarTls } from './guardiao-de-escopo/sonda-tls';
 import { PublicadorDeResultados } from './resultados';
 import { iniciarServidorDeSaude } from './saude';
 import { criarEntregadorDeWebhook } from './tarefas/entregar-webhook';
-import { criarClienteModelo } from './modulos/ativo/cliente-modelo';
+import { criarClienteModelo, type ClienteModelo } from './modulos/ativo/cliente-modelo';
 import { criarGeradorAdaptativo, type GeradorAdaptativo } from './modulos/ativo/gerador-adaptativo-ia';
 import { criarExecutorDeAvaliacao } from './tarefas/executar-avaliacao';
 import { criarVerificadorDePropriedade } from './tarefas/verificar-propriedade';
@@ -69,7 +69,23 @@ async function iniciar(config: ConfigDoWorker): Promise<void> {
     }
   }
 
+  let clienteDeModeloAutonomo: ClienteModelo | undefined;
+  if (config.iaAutonomoAtivo) {
+    if (config.iaProvedorChave === '') {
+      registrar('Perfil AUTONOMO ativo, mas sem chave do provedor; a etapa do agente será ignorada.');
+    } else {
+      clienteDeModeloAutonomo = criarClienteModelo({
+        url: config.iaProvedorUrl,
+        modelo: config.iaProvedorModelo,
+        chave: config.iaProvedorChave,
+      });
+      registrar('Perfil AUTONOMO ligado: conteúdo do alvo será enviado ao provedor do modelo.');
+    }
+  }
+
   const executor = criarExecutorDeAvaliacao({
+    clienteDeModeloAutonomo,
+    orcamentoAutonomo: config.iaAutonomoOrcamento,
     geradorAdaptativoDeIa,
     orcamentoAdaptativoDeIa: config.iaAdaptativoOrcamento,
     clienteHttp,
