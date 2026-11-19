@@ -41,6 +41,7 @@ const DESCRICAO_DO_PERFIL: Readonly<Record<RelatorioDto['perfil'], string>> = {
   PADRAO: 'Padrão: verificações passivas com sondagens leves no ambiente de homologação.',
   COMPLETO: 'Completo: todas as verificações disponíveis, sempre limitadas ao ambiente de homologação.',
   IA: 'IA: avaliação de um aplicativo com inteligência artificial por meio do conector configurado, sempre limitada ao ambiente de homologação.',
+  AUTONOMO: 'Autônomo: um agente de IA conduz a avaliação, decidindo as próximas verificações dentro do ambiente de homologação autorizado.',
 };
 
 const formatarData = (iso: string): string =>

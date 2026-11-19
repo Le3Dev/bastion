@@ -21,7 +21,7 @@ export type MetodoDeVerificacao = (typeof METODOS_DE_VERIFICACAO)[number];
 export const ESTADOS_DA_VERIFICACAO = ['PENDENTE', 'VERIFICADO', 'FALHOU', 'EXPIRADO'] as const;
 export type EstadoDaVerificacao = (typeof ESTADOS_DA_VERIFICACAO)[number];
 
-export const PERFIS_DE_AVALIACAO = ['PASSIVO', 'PADRAO', 'COMPLETO', 'IA'] as const;
+export const PERFIS_DE_AVALIACAO = ['PASSIVO', 'PADRAO', 'COMPLETO', 'IA', 'AUTONOMO'] as const;
 export type PerfilDeAvaliacao = (typeof PERFIS_DE_AVALIACAO)[number];
 
 export const ESTADOS_DA_AVALIACAO = [

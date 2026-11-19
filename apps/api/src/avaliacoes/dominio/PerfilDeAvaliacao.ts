@@ -1,6 +1,6 @@
-export type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA';
+export type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA' | 'AUTONOMO';
 
-export const PERFIS_DE_AVALIACAO: readonly PerfilDeAvaliacao[] = ['PASSIVO', 'PADRAO', 'COMPLETO', 'IA'];
+export const PERFIS_DE_AVALIACAO: readonly PerfilDeAvaliacao[] = ['PASSIVO', 'PADRAO', 'COMPLETO', 'IA', 'AUTONOMO'];
 
 const MINUTO_EM_MS = 60_000;
 
@@ -18,6 +18,7 @@ export const tempoMaximoDeExecucaoMs = (perfil: PerfilDeAvaliacao): number => {
     case 'PADRAO':
       return 30 * MINUTO_EM_MS;
     case 'COMPLETO':
+    case 'AUTONOMO':
       return 60 * MINUTO_EM_MS;
     case 'IA':
       return 20 * MINUTO_EM_MS;
@@ -31,6 +32,7 @@ export const metodosDoPerfil = (perfil: PerfilDeAvaliacao): string[] => {
     case 'PADRAO':
       return ['GET', 'HEAD', 'OPTIONS'];
     case 'COMPLETO':
+    case 'AUTONOMO':
       return ['GET', 'HEAD', 'OPTIONS', 'POST'];
     case 'IA':
       return ['GET', 'HEAD', 'POST'];
@@ -44,6 +46,7 @@ export const tetoDeRequisicoes = (perfil: PerfilDeAvaliacao): number => {
     case 'PADRAO':
       return 500;
     case 'COMPLETO':
+    case 'AUTONOMO':
       return 2000;
     case 'IA':
       return 100;
@@ -103,6 +106,13 @@ const ETAPAS_DO_PERFIL_IA: readonly string[] = [
   'Análise e deduplicação',
 ];
 
+const ETAPAS_DO_PERFIL_AUTONOMO: readonly string[] = [
+  'Conferir propriedade e escopo',
+  'Mapeamento de páginas',
+  'Ações do agente',
+  'Análise e deduplicação',
+];
+
 /** Nomes das etapas, na ordem de execução (o worker emite com os mesmos nomes). */
 export const etapasDoPerfil = (perfil: PerfilDeAvaliacao): readonly string[] => {
   switch (perfil) {
@@ -114,5 +124,7 @@ export const etapasDoPerfil = (perfil: PerfilDeAvaliacao): readonly string[] => 
       return ETAPAS_DO_PERFIL_COMPLETO;
     case 'IA':
       return ETAPAS_DO_PERFIL_IA;
+    case 'AUTONOMO':
+      return ETAPAS_DO_PERFIL_AUTONOMO;
   }
 };

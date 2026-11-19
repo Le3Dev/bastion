@@ -28,7 +28,7 @@ export interface DadosDoSistema {
 }
 
 /** Perfis de avaliação conhecidos pelo contexto de sistemas (sem depender do contexto de avaliações). */
-export type PerfilParaAvaliar = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA';
+export type PerfilParaAvaliar = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA' | 'AUTONOMO';
 
 export interface DadosParaCadastrarSistema {
   id: string;

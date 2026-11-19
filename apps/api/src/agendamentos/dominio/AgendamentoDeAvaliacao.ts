@@ -2,7 +2,7 @@ import { criarEvento, ErroDeDominio } from '@bastion/dominio-compartilhado';
 import type { EventoDeAgendamento } from './eventos';
 
 export type FrequenciaDaAgenda = 'DIARIA' | 'SEMANAL' | 'MENSAL';
-export type PerfilDoAgendamento = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA';
+export type PerfilDoAgendamento = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA' | 'AUTONOMO';
 
 /** Objeto de valor: autorização por escrito para perfis ativos agendados. */
 export interface AutorizacaoDoAgendamento {

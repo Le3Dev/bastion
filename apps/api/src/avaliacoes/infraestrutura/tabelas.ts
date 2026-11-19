@@ -2,7 +2,7 @@ import { boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid 
 import { organizacoes } from '../../contas/infraestrutura/tabelas'
 import { sistemas } from '../../sistemas/infraestrutura/tabelas'
 
-type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA'
+type PerfilDeAvaliacao = 'PASSIVO' | 'PADRAO' | 'COMPLETO' | 'IA' | 'AUTONOMO'
 type OrigemDaAvaliacao = 'WEB' | 'API' | 'CI' | 'AGENDA'
 type EstadoDaAvaliacao =
   | 'RASCUNHO'
